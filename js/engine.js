@@ -6,7 +6,7 @@ import { CARDS, byId, THEATERS, cap } from './cards.js';
 // VP the opponent scores when a player withdraws, based on how many cards the
 // withdrawing player still holds. The player with initiative pays more for
 // hanging on longer. Entries are [minCardsLeft, vp], checked in order.
-const WITHDRAW_VP = {
+export const WITHDRAW_VP = {
   first:  [[4, 2], [2, 3], [1, 4], [0, 6]],
   second: [[5, 2], [3, 3], [2, 4], [0, 6]],
 };
@@ -50,6 +50,8 @@ function deal(st) {
   for (const t of st.order) st.board[t] = [[], []];
   st.turn = st.first;
   st.pending = null;
+  st.stack = [];
+  st.extraFor = null;
   st.airDrop = [false, false];
   st.phase = 'battle';
   st.result = null;
@@ -200,73 +202,90 @@ function play(st, p, a) {
     ? `P${p + 1} improvised a face-down card to ${cap(t)}.`
     : `P${p + 1} deployed ${c.name} (${c.str}) to ${cap(t)}.`);
 
-  if (!a.faceDown && c.kind === 'instant') return triggerInstant(st, p, c, t);
-  return finishTurn(st);
+  if (!a.faceDown && c.kind === 'instant') pushInstant(st, p, c, t);
+  return pump(st);
 }
 
-function triggerInstant(st, p, c, t) {
+// Queues an instant ability as a frame on the effect stack. Effects that need
+// no choice (Air Drop) apply immediately and push nothing.
+function pushInstant(st, p, c, t) {
   switch (c.name) {
     case 'Air Drop':
       st.airDrop[p] = true;
-      return finishTurn(st);
-    case 'Maneuver': {
-      const options = uncoveredRefs(st, { theaters: adjacent(st, t) });
-      if (!options.length) return finishTurn(st);
-      st.pending = { type: 'flip', player: p, options, skippable: true,
-        label: 'Maneuver: flip an uncovered card in an adjacent lane' };
-      return null;
-    }
-    case 'Ambush': {
-      const options = uncoveredRefs(st);
-      if (!options.length) return finishTurn(st);
-      st.pending = { type: 'flip', player: p, options, skippable: true,
-        label: 'Ambush: flip any uncovered card' };
-      return null;
-    }
+      return;
+    case 'Maneuver':
+      st.stack.push({ type: 'flip', mode: 'maneuver', player: p, source: t, skippable: true,
+        label: 'Maneuver: flip an uncovered card in an adjacent lane' });
+      return;
+    case 'Ambush':
+      st.stack.push({ type: 'flip', mode: 'ambush', player: p, source: t, skippable: true,
+        label: 'Ambush: flip any uncovered card' });
+      return;
     case 'Disrupt':
-      st.pending = { type: 'disrupt', player: p, first: p, stage: 0 };
-      return advanceDisrupt(st);
-    case 'Reinforce': {
-      if (!st.deck.length) return finishTurn(st);
-      st.pending = { type: 'reinforce', player: p, card: st.deck[0],
-        options: adjacent(st, t), skippable: true,
-        label: 'Reinforce: play the top deck card face-down to an adjacent lane' };
-      return null;
-    }
-    case 'Transport': {
-      const options = ownRefs(st, p);
-      st.pending = { type: 'transport-pick', player: p, options, skippable: true,
-        label: 'Transport: choose one of your cards to move' };
-      return null;
-    }
-    case 'Redeploy': {
-      const options = ownRefs(st, p, { faceDownOnly: true });
-      if (!options.length) return finishTurn(st);
-      st.pending = { type: 'redeploy', player: p, options, skippable: true,
-        label: 'Redeploy: return a face-down card to hand and take another turn' };
-      return null;
-    }
-    default:
-      return finishTurn(st);
+      st.stack.push({ type: 'disrupt', player: p, first: p, stage: 0, skippable: false });
+      return;
+    case 'Reinforce':
+      if (st.deck.length) {
+        st.stack.push({ type: 'reinforce', player: p, card: st.deck[0],
+          options: adjacent(st, t), skippable: true,
+          label: 'Reinforce: play the top deck card face-down to an adjacent lane' });
+      }
+      return;
+    case 'Transport':
+      st.stack.push({ type: 'transport-pick', player: p, skippable: true,
+        label: 'Transport: choose one of your cards to move' });
+      return;
+    case 'Redeploy':
+      st.stack.push({ type: 'redeploy', player: p, skippable: true,
+        label: 'Redeploy: return a face-down card to hand and take another turn' });
+      return;
   }
 }
 
-function advanceDisrupt(st) {
-  const pd = st.pending;
-  while (pd.stage < 2) {
-    const chooser = pd.stage === 0 ? pd.first : 1 - pd.first;
-    const options = uncoveredRefs(st, { owner: chooser });
-    if (options.length) {
-      pd.player = chooser;
-      pd.options = options;
-      pd.skippable = false;
-      pd.label = 'Disrupt: flip one of your own uncovered cards';
-      return null;
-    }
-    pd.stage += 1;
+// A frame can sit on the stack while a triggered ability resolves above it
+// (e.g. Disrupt waiting out a revealed Maneuver), so legal targets are
+// recomputed each time a frame becomes the active one.
+function activateFrame(st, f) {
+  switch (f.type) {
+    case 'flip':
+      f.options = f.mode === 'maneuver'
+        ? uncoveredRefs(st, { theaters: adjacent(st, f.source) })
+        : uncoveredRefs(st);
+      return f.options.length > 0;
+    case 'disrupt':
+      while (f.stage < 2) {
+        const chooser = f.stage === 0 ? f.first : 1 - f.first;
+        const options = uncoveredRefs(st, { owner: chooser });
+        if (options.length) {
+          f.player = chooser;
+          f.options = options;
+          f.label = 'Disrupt: flip one of your own uncovered cards';
+          return true;
+        }
+        f.stage += 1;
+      }
+      return false;
+    case 'transport-pick':
+      f.options = ownRefs(st, f.player);
+      return f.options.length > 0;
+    case 'redeploy':
+      f.options = ownRefs(st, f.player, { faceDownOnly: true });
+      return f.options.length > 0;
+    default: // reinforce, transport-dest — options fixed at creation
+      return true;
+  }
+}
+
+function pump(st) {
+  while (st.stack.length) {
+    const f = st.stack[st.stack.length - 1];
+    if (activateFrame(st, f)) { st.pending = f; return null; }
+    st.stack.pop();
   }
   st.pending = null;
-  return finishTurn(st);
+  const extraFor = st.extraFor;
+  st.extraFor = null;
+  return finishTurn(st, extraFor);
 }
 
 function flipEntry(st, ref) {
@@ -276,84 +295,90 @@ function flipEntry(st, ref) {
   addLog(st, e.faceUp
     ? `${c.name} (${c.str}) was flipped face-up in ${cap(ref.t)}.`
     : `P${ref.p + 1}'s ${c.name} was flipped face-down in ${cap(ref.t)}.`);
+  // A card flipped face-up triggers its instant ability, resolved by its owner.
+  if (e.faceUp && c.kind === 'instant') pushInstant(st, ref.p, c, ref.t);
 }
 
 function resolvePending(st, a) {
   const pd = st.pending;
   if (a.t === 'skip') {
     if (!pd.skippable) return 'That effect is mandatory.';
-    st.pending = null;
-    return finishTurn(st);
+    st.stack.pop();
+    return pump(st);
   }
   if (a.t !== 'pick') return 'Choose a target (or skip).';
 
   switch (pd.type) {
     case 'flip': {
       if (!pd.options.some(o => sameRef(o, a.ref))) return 'Not a legal target.';
+      st.stack.pop();
       flipEntry(st, a.ref);
-      st.pending = null;
-      return finishTurn(st);
+      return pump(st);
     }
     case 'disrupt': {
       if (!pd.options.some(o => sameRef(o, a.ref))) return 'Not a legal target.';
-      flipEntry(st, a.ref);
       pd.stage += 1;
-      return advanceDisrupt(st);
+      flipEntry(st, a.ref);
+      return pump(st);
     }
     case 'reinforce': {
       if (!pd.options.includes(a.theater)) return 'Not an adjacent lane.';
+      st.stack.pop();
       const id = st.deck.shift();
       const p = pd.player;
-      st.pending = null;
       if (hasOngoing(st, 'Containment')) {
         st.discard.push(id);
         addLog(st, `P${p + 1}'s reinforcement was destroyed by Containment.`);
-        return finishTurn(st);
+        return pump(st);
       }
       const occupied = st.board[a.theater][0].length + st.board[a.theater][1].length;
       if (occupied >= 3 && blockadedTheaters(st).has(a.theater)) {
         st.discard.push(id);
         addLog(st, `P${p + 1}'s reinforcement was destroyed by the Blockade on ${cap(a.theater)}.`);
-        return finishTurn(st);
+        return pump(st);
       }
       st.board[a.theater][p].push({ id, faceUp: false });
       addLog(st, `P${p + 1} reinforced ${cap(a.theater)} with a face-down card.`);
-      return finishTurn(st);
+      return pump(st);
     }
     case 'transport-pick': {
       if (!pd.options.some(o => sameRef(o, a.ref))) return 'Not one of your cards.';
-      st.pending = { type: 'transport-dest', player: pd.player, from: a.ref,
-        options: st.order.filter(t => t !== a.ref.t), skippable: true,
-        label: 'Transport: choose the destination lane' };
-      return null;
+      pd.type = 'transport-dest';
+      pd.from = a.ref;
+      pd.options = st.order.filter(t => t !== a.ref.t);
+      pd.label = 'Transport: choose the destination lane';
+      return pump(st);
     }
     case 'transport-dest': {
       if (!pd.options.includes(a.theater)) return 'Not a legal destination.';
+      st.stack.pop();
       const [e] = st.board[pd.from.t][pd.from.p].splice(pd.from.i, 1);
       st.board[a.theater][pd.player].push(e);
       addLog(st, e.faceUp
         ? `P${pd.player + 1} transported ${byId[e.id].name} from ${cap(pd.from.t)} to ${cap(a.theater)}.`
         : `P${pd.player + 1} transported a face-down card from ${cap(pd.from.t)} to ${cap(a.theater)}.`);
-      st.pending = null;
-      return finishTurn(st);
+      return pump(st);
     }
     case 'redeploy': {
       if (!pd.options.some(o => sameRef(o, a.ref))) return 'Not a legal target.';
+      st.stack.pop();
       const [e] = st.board[a.ref.t][a.ref.p].splice(a.ref.i, 1);
       st.hands[pd.player].push(e.id);
       addLog(st, `P${pd.player + 1} redeployed a face-down card to hand and goes again.`);
-      st.pending = null;
-      return finishTurn(st, true);
+      st.extraFor = pd.player;
+      return pump(st);
     }
     default:
       return 'Nothing to resolve.';
   }
 }
 
-function finishTurn(st, extraTurn = false) {
+// extraFor: player who earned an extra turn (Redeploy); otherwise turn passes.
+function finishTurn(st, extraFor = null) {
+  st.stack = [];
   st.pending = null;
   if (!st.hands[0].length && !st.hands[1].length) return resolveBattle(st);
-  if (!extraTurn) st.turn = 1 - st.turn;
+  st.turn = extraFor !== null ? extraFor : 1 - st.turn;
   if (!st.hands[st.turn].length) st.turn = 1 - st.turn; // out of cards; other player continues
   return null;
 }
@@ -403,6 +428,7 @@ export function viewFor(st, p) {
   const v = JSON.parse(JSON.stringify(st));
   const o = 1 - p;
   delete v.seed;
+  delete v.stack;
   v.me = p;
   v.hands[o] = v.hands[o].map(() => null);
   v.deckCount = v.deck.length;

@@ -34,9 +34,19 @@
         <li>Each battle, you and your opponent are dealt 6 cards across three lanes: Air, Land and Sea.</li>
         <li>On your turn: <b>deploy</b> a card face-up to its matching lane (its ability triggers), <b>improvise</b> any card face-down to any lane as a plain strength-2, or <b>withdraw</b>.</li>
         <li>When both hands are empty, whoever holds the higher total strength in a lane controls it — ties (and empty lanes) go to the player with initiative. Control 2 of 3 lanes to win the battle for 6 VP.</li>
-        <li>Withdrawing concedes the battle but gives up fewer VP the earlier you quit (2–6 VP based on cards still in hand).</li>
+        <li>Withdrawing concedes the battle, but gives up fewer VP the earlier you quit.</li>
         <li>Between battles the lanes rotate, initiative swaps, and everything is reshuffled. First to 12 VP wins the war.</li>
       </ul>
+      <p class="rules-sub">Withdrawing gives your opponent VP based on the cards you still hold:</p>
+      <table class="rules-table">
+        <tr><th>Cards in hand</th><th>You have initiative</th><th>You don't</th></tr>
+        <tr><td>5–6</td><td>2</td><td>2</td></tr>
+        <tr><td>4</td><td>2</td><td>3</td></tr>
+        <tr><td>3</td><td>3</td><td>3</td></tr>
+        <tr><td>2</td><td>3</td><td>4</td></tr>
+        <tr><td>1</td><td>4</td><td>6</td></tr>
+        <tr><td>0</td><td>6</td><td>6</td></tr>
+      </table>
     </details>
   </div>
 </div>
@@ -53,6 +63,7 @@
 <div id="curtain" hidden></div>
 <div id="overlay" hidden></div>
 <div id="toast" hidden></div>
+<div id="hovercard" hidden></div>
 
 <script type="module" src="js/main.js"></script>
 </body>

@@ -160,6 +160,60 @@ test('Disrupt forces both players to flip, chooser first', () => {
   assert.equal(st.pending, null);
 });
 
+test('flipping a card face-up triggers its instant, resolved by its owner', () => {
+  const st = bareState();
+  put(st, 'land', 1, 'A3', false); // opponent's face-down Maneuver
+  put(st, 'air', 0, 'A6', true);   // a target adjacent to land
+  st.hands[0] = ['L2', 'L6'];
+  st.hands[1] = ['S6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L2', theater: 'land', faceDown: false }), null); // Ambush
+  assert.equal(st.pending.type, 'flip');
+  assert.equal(applyAction(st, 0, { t: 'pick', ref: { t: 'land', p: 1, i: 0 } }), null);
+  // The revealed Maneuver now belongs to the opponent to resolve.
+  assert.equal(st.pending.type, 'flip');
+  assert.equal(st.pending.mode, 'maneuver');
+  assert.equal(st.pending.player, 1);
+  assert.deepEqual(st.pending.options, [{ t: 'air', p: 0, i: 0 }]);
+  assert.equal(applyAction(st, 1, { t: 'pick', ref: { t: 'air', p: 0, i: 0 } }), null);
+  assert.equal(st.board.air[0][0].faceUp, false);
+  assert.equal(st.pending, null);
+  assert.equal(st.turn, 1);
+});
+
+test('flipping an ongoing card face-up does not create a pending effect', () => {
+  const st = bareState();
+  put(st, 'air', 1, 'A5', false); // face-down Containment
+  st.hands[0] = ['L2', 'L6'];
+  st.hands[1] = ['S6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L2', theater: 'land', faceDown: false }), null);
+  assert.equal(applyAction(st, 0, { t: 'pick', ref: { t: 'air', p: 1, i: 0 } }), null);
+  assert.equal(st.board.air[1][0].faceUp, true);
+  assert.equal(st.pending, null);
+  assert.equal(st.turn, 1);
+});
+
+test('Disrupt resumes after a flip-triggered ability resolves', () => {
+  const st = bareState();
+  put(st, 'air', 0, 'L1', false);  // P0's own face-down Reinforce (instant when revealed)
+  put(st, 'sea', 1, 'S6', true);   // P1's uncovered card
+  st.deck = ['A6'];
+  st.hands[0] = ['L5', 'L6'];
+  st.hands[1] = ['S1'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L5', theater: 'land', faceDown: false }), null); // Disrupt
+  assert.equal(st.pending.type, 'disrupt');
+  // P0 flips their own face-down Reinforce face-up → its instant triggers first
+  assert.equal(applyAction(st, 0, { t: 'pick', ref: { t: 'air', p: 0, i: 0 } }), null);
+  assert.equal(st.pending.type, 'reinforce');
+  assert.equal(st.pending.player, 0);
+  assert.equal(applyAction(st, 0, { t: 'pick', theater: 'land' }), null); // deck card face-down to land
+  assert.equal(st.board.land[0].length, 2); // Disrupt itself + the reinforcement
+  // Disrupt resumes: now P1 must flip one of their own uncovered cards
+  assert.equal(st.pending.type, 'disrupt');
+  assert.equal(st.pending.player, 1);
+  assert.equal(applyAction(st, 1, { t: 'pick', ref: { t: 'sea', p: 1, i: 0 } }), null);
+  assert.equal(st.pending, null);
+});
+
 test('battle resolution: ties and empty lanes go to initiative, winner gets 6 VP', () => {
   const st = bareState({ first: 1 });
   put(st, 'air', 0, 'A6', true);  // P0 wins air 6-0

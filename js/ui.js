@@ -2,7 +2,7 @@
 // Stateless apart from the current hand selection; re-rendered on every update.
 
 import { byId, ICONS, THEATER_ART, cap } from './cards.js';
-import { strength, canPlayFaceUp, faceDownValue } from './engine.js';
+import { strength, canPlayFaceUp, faceDownValue, WITHDRAW_VP } from './engine.js';
 
 let sel = null;        // selected hand card id
 let lastView = null;
@@ -17,6 +17,7 @@ export function render(view, context) {
   lastView = view;
   ctx = context;
   wire();
+  hideHover();
   if (sel && !view.hands[ctx.me].includes(sel)) sel = null;
   const mine = myMove(view);
   $('#topbar').innerHTML = topbarHTML(view, mine);
@@ -133,14 +134,15 @@ function stripHTML(view, t, owner, i, refs) {
   const cls = `strip ${uncov ? 'uncov' : ''} ${target ? 'target' : ''}`;
   if (e.faceUp) {
     const c = byId[e.id];
-    return `<div class="${cls} faceup th-${c.theater}" data-ref="${ref}" title="${esc(c.text)}">
+    return `<div class="${cls} faceup th-${c.theater}" data-ref="${ref}" data-hover="${c.id}">
       <span class="s-str">${c.str}</span><span class="s-name">${esc(c.name)}</span>
       <svg class="s-icon" viewBox="0 0 48 48" aria-hidden="true">${ICONS[c.name]}</svg>
     </div>`;
   }
   const known = e.id ? byId[e.id] : null;
   const val = faceDownValue(view, owner);
-  return `<div class="${cls} fd" data-ref="${ref}" title="Face-down: worth ${val}, any lane">
+  const hover = known ? `data-hover="${known.id}" data-down="1" data-val="${val}"` : `data-hover="fd" data-val="${val}"`;
+  return `<div class="${cls} fd" data-ref="${ref}" ${hover}>
     <span class="s-str">${val}</span>
     <span class="s-name">${known ? esc(known.name) + ' (down)' : 'Face-down'}</span>
     <span class="s-star">★</span>
@@ -220,6 +222,86 @@ function renderOverlay(view) {
   el.hidden = false;
 }
 
+// ---------- hover previews ----------
+
+function hideHover() {
+  const hc = document.getElementById('hovercard');
+  if (hc) hc.hidden = true;
+}
+
+function showHover(strip) {
+  const hc = document.getElementById('hovercard');
+  const d = strip.dataset;
+  let theater = '';
+  if (d.hover === 'fd') {
+    hc.innerHTML = `
+      <div class="h-top"><span class="h-str">${d.val}</span><span class="h-name">Face-down card</span></div>
+      <div class="h-text">Identity hidden. Counts as strength ${d.val} in its lane; its ability is inactive while face-down.</div>`;
+  } else {
+    const c = byId[d.hover];
+    theater = c.theater;
+    const kind = c.kind === 'none' ? 'No ability'
+      : c.kind === 'instant' ? 'Instant — triggers when deployed or flipped face-up'
+      : 'Ongoing — active while face-up';
+    const note = d.down === '1'
+      ? `<div class="h-note">Currently face-down: counts as ${d.val}, ability inactive.</div>` : '';
+    hc.innerHTML = `
+      <div class="h-top"><span class="h-str">${c.str}</span><span class="h-name">${esc(c.name)}</span></div>
+      <svg class="h-icon" viewBox="0 0 48 48" aria-hidden="true">${ICONS[c.name]}</svg>
+      <div class="h-text">${esc(c.text)}</div>
+      <div class="h-kind">${kind}</div>${note}`;
+  }
+  hc.className = theater ? `th-${theater}` : '';
+  hc.hidden = false;
+  const r = strip.getBoundingClientRect();
+  const w = hc.offsetWidth, h = hc.offsetHeight;
+  let x = r.right + 12;
+  if (x + w > innerWidth - 8) x = r.left - w - 12;
+  if (x < 8) x = 8;
+  const y = Math.max(8, Math.min(r.top + r.height / 2 - h / 2, innerHeight - h - 8));
+  hc.style.left = `${x}px`;
+  hc.style.top = `${y}px`;
+}
+
+// ---------- withdraw dialog ----------
+
+const vpFromTable = (table, left) => table.find(([min]) => left >= min)[1];
+
+function showWithdrawPanel(view) {
+  const me = ctx.me;
+  const left = view.hands[me].length;
+  const haveInit = view.first === me;
+  const myTable = haveInit ? WITHDRAW_VP.first : WITHDRAW_VP.second;
+  const oppVP = vpFromTable(myTable, left);
+  let rows = '';
+  for (let n = 6; n >= 0; n--) {
+    const a = vpFromTable(WITHDRAW_VP.first, n);
+    const b = vpFromTable(WITHDRAW_VP.second, n);
+    const hit = n === left;
+    rows += `<tr class="${hit ? 'wd-now' : ''}">
+      <td>${n}</td>
+      <td class="${hit && haveInit ? 'wd-hit' : ''}">${a}</td>
+      <td class="${hit && !haveInit ? 'wd-hit' : ''}">${b}</td>
+    </tr>`;
+  }
+  const el = document.getElementById('overlay');
+  el.innerHTML = `<div class="panel">
+    <h2>Withdraw from battle ${view.battle}?</h2>
+    <p class="muted">Your opponent scores VP based on the cards you still hold.
+      You ${haveInit ? 'have' : "don't have"} initiative this battle.</p>
+    <table>
+      <tr><th>Cards in hand</th><th>With initiative</th><th>Without</th></tr>
+      ${rows}
+    </table>
+    <p class="score-line">Withdrawing now gives ${esc(ctx.names[1 - me])} <b>${oppVP} VP</b>.</p>
+    <div class="btn-row">
+      <button id="btn-wd-confirm" class="danger">Withdraw (+${oppVP} VP to them)</button>
+      <button id="btn-wd-cancel">Keep fighting</button>
+    </div>
+  </div>`;
+  el.hidden = false;
+}
+
 // ---------- events (delegated once) ----------
 
 function wire() {
@@ -240,12 +322,18 @@ function wire() {
     if (tile) { ctx.send({ t: 'pick', theater: tile.dataset.tile }); }
   });
 
+  $('#board').addEventListener('mouseover', ev => {
+    const strip = ev.target.closest('.strip[data-hover]');
+    if (strip) showHover(strip);
+  });
+  $('#board').addEventListener('mouseout', ev => {
+    if (ev.target.closest('.strip[data-hover]')) hideHover();
+  });
+
   $('#handbar').addEventListener('click', ev => {
     if (ev.target.id === 'btn-skip') { ctx.send({ t: 'skip' }); return; }
     if (ev.target.id === 'btn-withdraw') {
-      if (confirm('Withdraw from this battle? Your opponent will score victory points.')) {
-        ctx.send({ t: 'withdraw' });
-      }
+      if (lastView) showWithdrawPanel(lastView);
       return;
     }
     const card = ev.target.closest('.card.canact');
@@ -260,6 +348,11 @@ function wire() {
       ctx.send({ t: 'next', battle: Number(ev.target.dataset.battle) });
     } else if (ev.target.id === 'btn-restart' && ctx.onRestart) {
       ctx.onRestart();
+    } else if (ev.target.id === 'btn-wd-confirm') {
+      document.getElementById('overlay').hidden = true;
+      ctx.send({ t: 'withdraw' });
+    } else if (ev.target.id === 'btn-wd-cancel') {
+      document.getElementById('overlay').hidden = true;
     }
   });
 }

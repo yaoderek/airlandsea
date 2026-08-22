@@ -10,9 +10,9 @@
   --ink: #262a20;
   --text: #d6d3c4;
   --muted: #8d947f;
-  --air: #8fb8d8;
+  --air: #d5dfe8;
   --land: #a2b064;
-  --sea: #6b95b8;
+  --sea: #46a5c4;
   --accent: #e0813f;
   --gold: #d9b45b;
   --display: 'Staatliches', 'Arial Narrow', sans-serif;
@@ -185,9 +185,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   border: 1px solid var(--line);
   min-height: 0;
 }
-.lane.th-air  { box-shadow: inset 0 0 0 1px #8fb8d81f; }
+.lane.th-air  { box-shadow: inset 0 0 0 1px #d5dfe824; }
 .lane.th-land { box-shadow: inset 0 0 0 1px #a2b0641f; }
-.lane.th-sea  { box-shadow: inset 0 0 0 1px #6b95b81f; }
+.lane.th-sea  { box-shadow: inset 0 0 0 1px #46a5c42a; }
 
 .zone {
   flex: 1;
@@ -208,11 +208,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   color: var(--ink);
   overflow: hidden;
 }
-.lane.th-air  .tile { background: linear-gradient(180deg, #b8d3e8, #8fb8d8); }
+.lane.th-air  .tile { background: linear-gradient(180deg, #edf2f7, #c3d2de); }
 .lane.th-land .tile { background: linear-gradient(180deg, #c0cb8a, #a2b064); }
-.lane.th-sea  .tile { background: linear-gradient(180deg, #93b6d2, #6b95b8); }
+.lane.th-sea  .tile { background: linear-gradient(180deg, #2b7194, #1a4c66); color: #e9f3f8; }
+
+.lane.th-sea .tile-score .lead { color: #ffd98a; }
+.lane.th-sea .tile-hint { color: #ffd98a; }
 
 .tile-art { position: absolute; inset: 0; width: 100%; height: 100%; color: #1d241c; opacity: .35; }
+.lane.th-air .tile-art { color: #47617a; opacity: .4; }
+.lane.th-sea .tile-art { color: #d9eef7; opacity: .5; }
 .tile-name { position: relative; font: 26px var(--display); letter-spacing: .35em; text-indent: .35em; }
 .tile-score {
   position: relative;
@@ -258,9 +263,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   font-size: 13px;
   flex-shrink: 0;
 }
-.strip.th-air  { border-left-color: #5d8cb0; }
+.strip.th-air  { border-left-color: #aec4d6; }
 .strip.th-land { border-left-color: #77843e; }
-.strip.th-sea  { border-left-color: #446e91; }
+.strip.th-sea  { border-left-color: #135f80; }
 
 .strip .s-str {
   font: 17px var(--display);
@@ -359,9 +364,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   user-select: none;
   flex-shrink: 1;
 }
-.card.th-air  { border-top-color: #5d8cb0; }
+.card.th-air  { border-top-color: #aec4d6; }
 .card.th-land { border-top-color: #77843e; }
-.card.th-sea  { border-top-color: #446e91; }
+.card.th-sea  { border-top-color: #135f80; }
 
 .card.canact { cursor: pointer; transition: transform .12s ease, box-shadow .12s ease; }
 .card.canact:hover { transform: translateY(-6px); }
@@ -415,6 +420,45 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .panel td.th-sea { color: var(--sea); }
 .score-line { font-size: 14px; }
 .panel button { background: var(--accent); color: #1d1206; padding: 10px 22px; font-size: 15px; }
+
+/* hover card preview */
+
+#hovercard {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  width: 210px;
+  background: linear-gradient(170deg, var(--paper), var(--paper-2));
+  color: var(--ink);
+  border: 1px solid #000a;
+  border-top: 6px solid #666;
+  border-radius: 10px;
+  padding: 10px 14px 12px;
+  box-shadow: 0 14px 34px #000d;
+}
+#hovercard.th-air  { border-top-color: #aec4d6; }
+#hovercard.th-land { border-top-color: #77843e; }
+#hovercard.th-sea  { border-top-color: #135f80; }
+#hovercard .h-top { display: flex; align-items: baseline; gap: 8px; }
+#hovercard .h-str { font: 30px var(--display); }
+#hovercard .h-name { font-weight: 600; font-size: 15px; }
+#hovercard .h-icon { width: 52px; height: 52px; display: block; margin: 6px auto; color: var(--ink); }
+#hovercard .h-text { font-size: 12.5px; line-height: 1.4; color: #33372b; }
+#hovercard .h-kind { margin-top: 7px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: #6d7360; }
+#hovercard .h-note { margin-top: 6px; font-size: 11.5px; font-style: italic; color: #6b5527; }
+
+/* withdraw dialog + rules table */
+
+.panel tr.wd-now td { color: var(--text); font-weight: 600; }
+.panel td.wd-hit { background: #3a2c1c; color: var(--gold); border-radius: 4px; }
+.btn-row { display: flex; gap: 10px; justify-content: center; }
+.btn-row .danger { background: #6d3030; color: #f2dede; }
+.btn-row button:not(.danger) { background: var(--paper); }
+
+.rules-sub { margin: 14px 0 6px; }
+.rules-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.rules-table th { text-align: center; font-weight: 600; color: var(--text); padding: 4px; }
+.rules-table td { text-align: center; padding: 3px; border-top: 1px solid var(--line); }
 
 #toast {
   position: fixed;
