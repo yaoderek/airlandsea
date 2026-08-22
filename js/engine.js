@@ -1,7 +1,7 @@
 // Pure rules engine. State is a plain JSON-serializable object; the host (or
 // hotseat screen) owns it and mutates it through applyAction. No DOM here.
 
-import { CARDS, byId, THEATERS, cap } from './cards.js';
+import { DECKS, byId, THEATERS, cap } from './cards.js';
 
 // VP the opponent scores when a player withdraws, based on how many cards the
 // withdrawing player still holds. The player with initiative pays more for
@@ -20,9 +20,10 @@ export function mulberry32(a) {
   };
 }
 
-export function newGame(seed) {
+export function newGame(seed, deckName = 'classic') {
   const st = {
     seed: seed >>> 0,
+    deckName: DECKS[deckName] ? deckName : 'classic',
     vp: [0, 0],
     battle: 1,
     first: (seed >>> 0) % 2,
@@ -38,7 +39,7 @@ export function newGame(seed) {
 
 function deal(st) {
   const rng = mulberry32((st.seed ^ (st.battle * 0x9E3779B9)) >>> 0);
-  const ids = CARDS.map(c => c.id);
+  const ids = DECKS[st.deckName].map(c => c.id);
   for (let i = ids.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [ids[i], ids[j]] = [ids[j], ids[i]];
@@ -75,19 +76,24 @@ function* allStacks(st) {
 }
 
 // Ongoing abilities are live while their card is face-up. owner=null matches either player.
-export function hasOngoing(st, name, owner = null) {
+export function hasEffect(st, effect, owner = null) {
   for (const { p, stack } of allStacks(st)) {
     if (owner !== null && p !== owner) continue;
-    for (const e of stack) if (e.faceUp && byId[e.id].name === name) return true;
+    for (const e of stack) if (e.faceUp && byId[e.id].effect === effect) return true;
   }
   return false;
+}
+
+// Face-up card with the given effect owned by `p` sitting in lane `t`.
+function laneEffect(st, effect, t, p) {
+  return st.board[t][p].some(e => e.faceUp && byId[e.id].effect === effect);
 }
 
 function blockadedTheaters(st) {
   const set = new Set();
   for (const { t, stack } of allStacks(st)) {
     for (const e of stack) {
-      if (e.faceUp && byId[e.id].name === 'Blockade') {
+      if (e.faceUp && byId[e.id].effect === 'blockade') {
         for (const a of adjacent(st, t)) set.add(a);
       }
     }
@@ -96,22 +102,23 @@ function blockadedTheaters(st) {
 }
 
 export function faceDownValue(st, p) {
-  return hasOngoing(st, 'Escalation', p) ? 4 : 2;
+  return hasEffect(st, 'escalation', p) ? 4 : 2;
 }
 
 export function strength(st, t, p) {
   const stk = st.board[t][p];
   let total = 0;
-  const cfi = stk.findIndex(e => e.faceUp && byId[e.id].name === 'Cover Fire');
+  const cfi = stk.findIndex(e => e.faceUp && byId[e.id].effect === 'coverfire');
   const fd = faceDownValue(st, p);
   stk.forEach((e, i) => {
     if (cfi >= 0 && i < cfi) total += 4;         // covered by Cover Fire
     else if (!e.faceUp) total += fd;
+    else if (byId[e.id].effect === 'trench' && i < stk.length - 1) total += 4; // Trench Line, covered
     else total += byId[e.id].str;
   });
   for (const a of adjacent(st, t)) {
     for (const e of st.board[a][p]) {
-      if (e.faceUp && byId[e.id].name === 'Support') total += 3;
+      if (e.faceUp && byId[e.id].aura) total += byId[e.id].aura; // Support / Flagship
     }
   }
   return total;
@@ -126,14 +133,15 @@ export function laneOpen(st, t) {
 }
 
 export function canPlayFaceDown(st, t) {
-  return laneOpen(st, t) && !hasOngoing(st, 'Containment');
+  return laneOpen(st, t) && !hasEffect(st, 'containment');
 }
 
 export function canPlayFaceUp(st, p, card, t) {
   if (!laneOpen(st, t)) return false;
+  if (laneEffect(st, 'nofly', t, 1 - p)) return false; // enemy No-Fly Zone
   if (card.theater === t) return true;
   if (st.airDrop[p]) return true;
-  if (card.str <= 3 && hasOngoing(st, 'Aerodrome', p)) return true;
+  if (card.str <= 3 && hasEffect(st, 'aerodrome', p)) return true;
   return false;
 }
 
@@ -191,7 +199,10 @@ function play(st, p, a) {
   const t = a.theater;
   if (!st.order.includes(t)) return 'Unknown lane.';
   if (!laneOpen(st, t)) return `Blockade: ${cap(t)} is full and can't be played into.`;
-  if (a.faceDown && hasOngoing(st, 'Containment')) {
+  if (!a.faceDown && laneEffect(st, 'nofly', t, 1 - p)) {
+    return `No-Fly Zone: you can't play face-up into ${cap(t)}.`;
+  }
+  if (a.faceDown && hasEffect(st, 'containment')) {
     return 'Containment prevents face-down plays.';
   }
   if (!a.faceDown && !canPlayFaceUp(st, p, c, t)) {
@@ -210,26 +221,30 @@ function play(st, p, a) {
 }
 
 // Queues an instant ability as a frame on the effect stack. Effects that need
-// no choice (Air Drop) apply immediately and push nothing.
+// no choice apply immediately and push nothing.
 function pushInstant(st, p, c, t) {
-  switch (c.name) {
-    case 'Air Drop':
+  switch (c.effect) {
+    case 'airdrop':
       st.airDrop[p] = true;
       return;
-    case 'Maneuver':
-      st.stack.push({ type: 'flip', mode: 'maneuver', player: p, source: t, skippable: true,
-        label: 'Maneuver: flip an uncovered card in an adjacent lane' });
+    case 'flip-adjacent':
+      st.stack.push({ type: 'flip', mode: 'adjacent', player: p, source: t, skippable: true,
+        label: `${c.name}: flip an uncovered card in an adjacent lane` });
       return;
-    case 'Ambush':
-      st.stack.push({ type: 'flip', mode: 'ambush', player: p, source: t, skippable: true,
-        label: 'Ambush: flip any uncovered card' });
+    case 'flip-any':
+      st.stack.push({ type: 'flip', mode: 'any', player: p, source: t, skippable: true,
+        label: `${c.name}: flip any uncovered card` });
       return;
-    case 'Disrupt':
+    case 'flip-lane':
+      st.stack.push({ type: 'flip', mode: 'lane', player: p, source: t, skippable: true,
+        label: `${c.name}: flip an uncovered card in this lane` });
+      return;
+    case 'disrupt':
       st.stack.push({ type: 'disrupt', player: p, first: p, stage: 0, skippable: false });
       return;
-    case 'Reinforce': {
+    case 'reinforce': {
       // The reinforcement is a face-down play, so Containment/Blockade rules apply.
-      const options = hasOngoing(st, 'Containment') ? []
+      const options = hasEffect(st, 'containment') ? []
         : adjacent(st, t).filter(x => laneOpen(st, x));
       if (st.deck.length && options.length) {
         st.stack.push({ type: 'reinforce', player: p, card: st.deck[0],
@@ -238,13 +253,66 @@ function pushInstant(st, p, c, t) {
       }
       return;
     }
-    case 'Transport':
+    case 'transport':
       st.stack.push({ type: 'transport-pick', player: p, skippable: true,
         label: 'Transport: choose one of your cards to move' });
       return;
-    case 'Redeploy':
+    case 'redeploy':
       st.stack.push({ type: 'redeploy', player: p, skippable: true,
         label: 'Redeploy: return a face-down card to hand and take another turn' });
+      return;
+    case 'selfmove':
+      st.stack.push({ type: 'transport-dest', player: p,
+        from: { t, p, i: st.board[t][p].length - 1 },
+        options: st.order.filter(x => x !== t), skippable: true,
+        label: `${c.name}: move this card to another lane` });
+      return;
+    case 'shove': {
+      const enemy = st.board[t][1 - p];
+      const adj = adjacent(st, t);
+      if (enemy.length && adj.length) {
+        st.stack.push({ type: 'transport-dest', player: p,
+          from: { t, p: 1 - p, i: enemy.length - 1 },
+          options: adj, skippable: true,
+          label: `${c.name}: push the enemy uncovered card to an adjacent lane` });
+      }
+      return;
+    }
+    case 'strafe': {
+      const enemy = st.board[t][1 - p];
+      if (enemy.length && enemy[enemy.length - 1].faceUp
+          && !laneEffect(st, 'flipguard', t, 1 - p)) {
+        flipEntry(st, { t, p: 1 - p, i: enemy.length - 1 });
+      }
+      return;
+    }
+    case 'conscript':
+      if (st.deck.length) {
+        st.hands[p].push(st.deck.shift());
+        addLog(st, `P${p + 1} conscripted a card from the deck into hand.`);
+      }
+      return;
+    case 'peekhand':
+      st.stack.push({ type: 'peek', player: p, ackOnly: true, skippable: true,
+        cards: [...st.hands[1 - p]],
+        label: "Scout Report — your opponent's hand:" });
+      return;
+    case 'peekdown': {
+      const cards = [];
+      for (const tt of st.order) {
+        for (const e of st.board[tt][1 - p]) if (!e.faceUp) cards.push(e.id);
+      }
+      st.stack.push({ type: 'peek', player: p, ackOnly: true, skippable: true,
+        cards, label: "Codebreakers — your opponent's face-down cards:" });
+      return;
+    }
+    case 'assault':
+      st.stack.push({ type: 'transport-pick', player: p, flipUp: true, skippable: true,
+        label: `${c.name}: move one of your cards (face-down cards flip face-up)` });
+      return;
+    case 'fdmove':
+      st.stack.push({ type: 'transport-pick', player: p, fdOnly: true, skippable: true,
+        label: `${c.name}: move one of your face-down cards` });
       return;
   }
 }
@@ -254,11 +322,15 @@ function pushInstant(st, p, c, t) {
 // recomputed each time a frame becomes the active one.
 function activateFrame(st, f) {
   switch (f.type) {
-    case 'flip':
-      f.options = f.mode === 'maneuver'
-        ? uncoveredRefs(st, { theaters: adjacent(st, f.source) })
+    case 'flip': {
+      let opts = f.mode === 'adjacent' ? uncoveredRefs(st, { theaters: adjacent(st, f.source) })
+        : f.mode === 'lane' ? uncoveredRefs(st, { theaters: [f.source] })
         : uncoveredRefs(st);
+      // Bunker Network: enemies can't flip your cards in its lane.
+      opts = opts.filter(o => o.p === f.player || !laneEffect(st, 'flipguard', o.t, o.p));
+      f.options = opts;
       return f.options.length > 0;
+    }
     case 'disrupt':
       while (f.stage < 2) {
         const chooser = f.stage === 0 ? f.first : 1 - f.first;
@@ -273,11 +345,13 @@ function activateFrame(st, f) {
       }
       return false;
     case 'transport-pick':
-      f.options = ownRefs(st, f.player);
+      f.options = ownRefs(st, f.player, { faceDownOnly: !!f.fdOnly });
       return f.options.length > 0;
     case 'redeploy':
       f.options = ownRefs(st, f.player, { faceDownOnly: true });
       return f.options.length > 0;
+    case 'peek':
+      return f.cards.length > 0;
     default: // reinforce, transport-dest — options fixed at creation
       return true;
   }
@@ -348,11 +422,15 @@ function resolvePending(st, a) {
     case 'transport-dest': {
       if (!pd.options.includes(a.theater)) return 'Not a legal destination.';
       st.stack.pop();
-      const [e] = st.board[pd.from.t][pd.from.p].splice(pd.from.i, 1);
-      st.board[a.theater][pd.player].push(e);
+      const owner = pd.from.p; // usually the mover; the enemy for Jet Stream pushes
+      const [e] = st.board[pd.from.t][owner].splice(pd.from.i, 1);
+      st.board[a.theater][owner].push(e);
       addLog(st, e.faceUp
-        ? `P${pd.player + 1} transported ${byId[e.id].name} from ${cap(pd.from.t)} to ${cap(a.theater)}.`
-        : `P${pd.player + 1} transported a face-down card from ${cap(pd.from.t)} to ${cap(a.theater)}.`);
+        ? `P${owner + 1}'s ${byId[e.id].name} moved from ${cap(pd.from.t)} to ${cap(a.theater)}.`
+        : `P${owner + 1}'s face-down card moved from ${cap(pd.from.t)} to ${cap(a.theater)}.`);
+      if (pd.flipUp && !e.faceUp) {
+        flipEntry(st, { t: a.theater, p: owner, i: st.board[a.theater][owner].length - 1 });
+      }
       return pump(st);
     }
     case 'redeploy': {
@@ -383,7 +461,15 @@ function theaterSummary(st) {
   return st.order.map(t => {
     const s0 = strength(st, t, 0);
     const s1 = strength(st, t, 1);
-    const winner = s0 === s1 ? st.first : (s0 > s1 ? 0 : 1); // ties (incl. empty) go to initiative
+    let winner;
+    if (s0 !== s1) {
+      winner = s0 > s1 ? 0 : 1;
+    } else {
+      // Spotter claims ties in its lane; otherwise ties (incl. empty) go to initiative.
+      const sp0 = laneEffect(st, 'spotter', t, 0);
+      const sp1 = laneEffect(st, 'spotter', t, 1);
+      winner = sp0 !== sp1 ? (sp0 ? 0 : 1) : st.first;
+    }
     return { t, s0, s1, winner };
   });
 }
@@ -434,8 +520,11 @@ export function viewFor(st, p) {
   for (const t of v.order) {
     v.board[t][o] = v.board[t][o].map(e => (e.faceUp ? e : { id: null, faceUp: false }));
   }
-  if (v.pending && v.pending.type === 'reinforce' && v.pending.player !== p) {
-    v.pending = { ...v.pending, card: null };
+  if (v.pending && v.pending.player !== p) {
+    // Hide private information riding on the pending frame (Reinforce peek,
+    // Scout Report / Codebreakers reveals).
+    if (v.pending.card) v.pending = { ...v.pending, card: null };
+    if (v.pending.cards) v.pending = { ...v.pending, cards: null };
   }
   return v;
 }

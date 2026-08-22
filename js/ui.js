@@ -161,11 +161,17 @@ function handbarHTML(view, mine) {
 
   let banner = '';
   if (pd) {
-    const peek = pd.type === 'reinforce' && pd.card
-      ? ` — top card: <b>${esc(byId[pd.card].name)} (${byId[pd.card].str})</b>` : '';
+    let extra = '';
+    if (pd.type === 'reinforce' && pd.card) {
+      extra = ` — top card: <b>${esc(byId[pd.card].name)} (${byId[pd.card].str})</b>`;
+    } else if (pd.type === 'peek' && pd.cards) {
+      extra = pd.cards.length
+        ? ` <b>${pd.cards.map(id => `${esc(byId[id].name)} (${byId[id].str})`).join(' · ')}</b>`
+        : ' <b>nothing found</b>';
+    }
     banner = `<div class="banner">
-      <span>${esc(pd.label || 'Resolve your card')}${peek}</span>
-      ${pd.skippable ? '<button id="btn-skip">Skip</button>' : ''}
+      <span>${esc(pd.label || 'Resolve your card')}${extra}</span>
+      ${pd.skippable ? `<button id="btn-skip">${pd.ackOnly ? 'OK' : 'Skip'}</button>` : ''}
     </div>`;
   }
 

@@ -18,8 +18,8 @@ function test(name, fn) {
 }
 
 // Builds a mid-battle state we can shape by hand.
-function bareState({ first = 0 } = {}) {
-  const st = newGame(1);
+function bareState({ first = 0, deck = 'classic' } = {}) {
+  const st = newGame(1, deck);
   st.first = first;
   st.turn = first;
   st.hands = [[], []];
@@ -195,7 +195,7 @@ test('flipping a card face-up triggers its instant, resolved by its owner', () =
   assert.equal(applyAction(st, 0, { t: 'pick', ref: { t: 'land', p: 1, i: 0 } }), null);
   // The revealed Maneuver now belongs to the opponent to resolve.
   assert.equal(st.pending.type, 'flip');
-  assert.equal(st.pending.mode, 'maneuver');
+  assert.equal(st.pending.mode, 'adjacent');
   assert.equal(st.pending.player, 1);
   assert.deepEqual(st.pending.options, [{ t: 'air', p: 0, i: 0 }]);
   assert.equal(applyAction(st, 1, { t: 'pick', ref: { t: 'air', p: 0, i: 0 } }), null);
@@ -299,6 +299,117 @@ test('view redacts opponent hand, deck, and face-down cards', () => {
   assert.equal(typeof own.board.air[p][0].id, 'string');
 });
 
+// ---------- Second Front (alternate deck) ----------
+
+test('second deck deals 6/6/6 unique alt cards', () => {
+  const st = newGame(42, 'second');
+  const all = [...st.hands[0], ...st.hands[1], ...st.deck];
+  assert.equal(new Set(all).size, 18);
+  assert.ok(all.every(id => /^[XYZ]/.test(id)));
+});
+
+test('Spotter wins ties in its lane; initiative rules elsewhere', () => {
+  const st = bareState({ first: 1, deck: 'second' });
+  put(st, 'air', 0, 'X1', true);  // P0 Spotter (1) in air
+  put(st, 'air', 1, 'Y1', true);  // P1 Trench Line (1) → air tied 1-1
+  st.hands = [['X6'], []];
+  st.turn = 0;
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'X6', theater: 'land', faceDown: true }), null);
+  const air = st.result.theaters.find(x => x.t === 'air');
+  assert.equal(air.winner, 0); // Spotter beats initiative on the tie
+  const sea = st.result.theaters.find(x => x.t === 'sea');
+  assert.equal(sea.winner, 1); // empty lane still goes to initiative
+});
+
+test('No-Fly Zone blocks enemy face-up plays into its lane only', () => {
+  const st = bareState({ deck: 'second' });
+  put(st, 'air', 1, 'X5', true); // P1's No-Fly Zone in air
+  st.hands[0] = ['X6'];
+  st.hands[1] = ['Z6'];
+  assert.ok(!canPlayFaceUp(st, 0, byId.X6, 'air'));
+  assert.ok(applyAction(st, 0, { t: 'play', card: 'X6', theater: 'air', faceDown: false }));
+  assert.ok(canPlayFaceDown(st, 'air')); // improvising is still allowed
+  assert.ok(canPlayFaceUp(st, 1, byId.Z6, 'sea')); // owner unaffected elsewhere
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'X6', theater: 'air', faceDown: true }), null);
+});
+
+test('Strafing Run auto-flips the enemy uncovered card in its lane', () => {
+  const st = bareState({ deck: 'second' });
+  put(st, 'air', 1, 'Y6', true);
+  st.hands[0] = ['X4', 'X6'];
+  st.hands[1] = ['Z6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'X4', theater: 'air', faceDown: false }), null);
+  assert.equal(st.board.air[1][0].faceUp, false);
+  assert.equal(st.pending, null); // no choice involved
+  assert.equal(st.turn, 1);
+});
+
+test('Bunker Network stops enemy flips in its lane', () => {
+  const st = bareState({ deck: 'second' });
+  put(st, 'land', 1, 'Y4', true); // P1 Bunker Network
+  put(st, 'land', 1, 'Z6', false); // protected face-down card on top
+  put(st, 'sea', 1, 'X6', true);   // unprotected elsewhere
+  st.hands[0] = ['Y3', 'X6'];
+  st.hands[1] = ['Z6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'Y3', theater: 'land', faceDown: false }), null); // Artillery Strike
+  // Only P0's own card (the strike itself) is flippable in land; P1's are guarded.
+  assert.ok(st.pending.options.every(o => o.p === 0));
+  assert.equal(applyAction(st, 0, { t: 'skip' }), null);
+});
+
+test('Conscription draws the top deck card into hand', () => {
+  const st = bareState({ deck: 'second' });
+  st.deck = ['X6', 'Z6'];
+  st.hands[0] = ['Y5', 'Y6'];
+  st.hands[1] = ['Z1'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'Y5', theater: 'land', faceDown: false }), null);
+  assert.deepEqual(st.hands[0], ['Y6', 'X6']);
+  assert.equal(st.deck.length, 1);
+  assert.equal(st.turn, 1);
+});
+
+test('Amphibious Assault moves a face-down card and triggers its reveal', () => {
+  const st = bareState({ deck: 'second' });
+  put(st, 'air', 0, 'Y5', false); // P0's face-down Conscription
+  st.deck = ['X6'];
+  st.hands[0] = ['Z5', 'Z6'];
+  st.hands[1] = ['Y6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'Z5', theater: 'sea', faceDown: false }), null);
+  assert.equal(st.pending.type, 'transport-pick');
+  assert.equal(applyAction(st, 0, { t: 'pick', ref: { t: 'air', p: 0, i: 0 } }), null);
+  assert.equal(st.pending.type, 'transport-dest');
+  assert.equal(applyAction(st, 0, { t: 'pick', theater: 'land' }), null);
+  const moved = st.board.land[0][0];
+  assert.equal(moved.id, 'Y5');
+  assert.equal(moved.faceUp, true);            // flipped on arrival
+  assert.deepEqual(st.hands[0], ['Z6', 'X6']); // …and its Conscription instant fired
+});
+
+test('Jet Stream pushes the enemy uncovered card to an adjacent lane', () => {
+  const st = bareState({ deck: 'second' });
+  put(st, 'air', 1, 'Y6', true);
+  st.hands[0] = ['X3', 'X6'];
+  st.hands[1] = ['Z6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'X3', theater: 'air', faceDown: false }), null);
+  assert.equal(st.pending.type, 'transport-dest');
+  assert.deepEqual(st.pending.options, ['land']);
+  assert.equal(applyAction(st, 0, { t: 'pick', theater: 'land' }), null);
+  assert.equal(st.board.air[1].length, 0);
+  assert.equal(st.board.land[1][0].id, 'Y6');
+});
+
+test('Scout Report reveals the opponent hand to its player only', () => {
+  const st = bareState({ deck: 'second' });
+  st.hands[0] = ['Y2', 'Y6'];
+  st.hands[1] = ['Z1', 'Z6'];
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'Y2', theater: 'land', faceDown: false }), null);
+  assert.equal(st.pending.type, 'peek');
+  assert.deepEqual(viewFor(st, 0).pending.cards, ['Z1', 'Z6']);
+  assert.equal(viewFor(st, 1).pending.cards, null);
+  assert.equal(applyAction(st, 0, { t: 'skip' }), null); // acknowledge
+  assert.equal(st.turn, 1);
+});
+
 // Random playout fuzz: no crashes, conservation of cards, games end.
 function legalActions(st) {
   if (st.phase === 'battleOver') return [{ actor: 0, a: { t: 'next', battle: st.battle } }];
@@ -310,7 +421,7 @@ function legalActions(st) {
     if (pd.type === 'reinforce' || pd.type === 'transport-dest') {
       for (const t of pd.options) acts.push({ actor: pd.player, a: { t: 'pick', theater: t } });
     } else {
-      for (const ref of pd.options) acts.push({ actor: pd.player, a: { t: 'pick', ref } });
+      for (const ref of pd.options || []) acts.push({ actor: pd.player, a: { t: 'pick', ref } });
     }
     return acts;
   }
@@ -329,9 +440,9 @@ function legalActions(st) {
   return acts;
 }
 
-test('fuzz: 40 random games complete legally', () => {
+test('fuzz: 40 random games complete legally (both decks)', () => {
   for (let seed = 1; seed <= 40; seed++) {
-    const st = newGame(seed * 977);
+    const st = newGame(seed * 977, seed % 2 ? 'classic' : 'second');
     let guard = 0;
     while (st.phase !== 'gameOver') {
       const acts = legalActions(st);

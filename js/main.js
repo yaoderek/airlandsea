@@ -8,6 +8,7 @@ import { render, toast } from './ui.js';
 
 const $ = q => document.querySelector(q);
 const rand = () => Math.floor(Math.random() * 2 ** 31);
+const chosenDeck = () => (document.querySelector('input[name="deck"]:checked') || {}).value || 'classic';
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PEER_PREFIX = 'alsw-clone-';
 
@@ -27,7 +28,7 @@ function lobbyStatus(msg) {
 // ---------- hotseat ----------
 
 function startHotseat() {
-  state = newGame(rand());
+  state = newGame(rand(), chosenDeck());
   lastHotseatP = null;
   showApp();
   hotseatUpdate();
@@ -45,7 +46,7 @@ function hotseatUpdate() {
         if (err) toast(err);
         hotseatUpdate();
       },
-      onRestart: () => { state = newGame(rand()); lastHotseatP = null; hotseatUpdate(); },
+      onRestart: () => { state = newGame(rand(), state.deckName); lastHotseatP = null; hotseatUpdate(); },
     });
   };
   if (state.phase === 'battle' && lastHotseatP !== null && p !== lastHotseatP) {
@@ -83,7 +84,7 @@ function startHost() {
     if (conn) { c.close(); return; } // one opponent only
     conn = c;
     c.on('open', () => {
-      state = newGame(rand());
+      state = newGame(rand(), chosenDeck());
       showApp();
       hostSync();
     });
@@ -109,7 +110,7 @@ function hostSync() {
       if (err) toast(err);
       hostSync();
     },
-    onRestart: () => { state = newGame(rand()); hostSync(); },
+    onRestart: () => { state = newGame(rand(), state.deckName); hostSync(); },
   });
 }
 
