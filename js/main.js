@@ -57,6 +57,7 @@ function hotseatUpdate() {
 }
 
 function showCurtain(msg, onContinue) {
+  $('#overlay').hidden = true; // the curtain replaces any result popup
   const el = $('#curtain');
   el.innerHTML = `<div class="panel"><h2>${msg}</h2><button id="btn-curtain">Ready</button></div>`;
   el.hidden = false;

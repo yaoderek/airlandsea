@@ -425,6 +425,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   z-index: 40;
   padding: 20px;
 }
+#curtain {
+  z-index: 45; /* the pass curtain always sits above result popups */
+}
 
 .panel {
   width: min(440px, 100%);
