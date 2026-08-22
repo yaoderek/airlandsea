@@ -2,7 +2,7 @@
 // Stateless apart from the current hand selection; re-rendered on every update.
 
 import { byId, ICONS, THEATER_ART, cap } from './cards.js';
-import { strength, canPlayFaceUp, faceDownValue, WITHDRAW_VP } from './engine.js';
+import { strength, canPlayFaceUp, canPlayFaceDown, faceDownValue, WITHDRAW_VP } from './engine.js';
 
 let sel = null;        // selected hand card id
 let lastView = null;
@@ -120,9 +120,11 @@ function laneHTML(view, t, mine, refs, lanes) {
 
 function playBtnsHTML(view, c, t) {
   const up = canPlayFaceUp(view, ctx.me, c, t);
+  const down = canPlayFaceDown(view, t);
+  if (!up && !down) return '<div class="playbtns"><span class="pb-blocked">Blocked</span></div>';
   return `<div class="playbtns">
     ${up ? `<button class="pb pb-up" data-play="up" data-lane="${t}">▲ Deploy</button>` : ''}
-    <button class="pb pb-down" data-play="down" data-lane="${t}">▼ Improvise</button>
+    ${down ? `<button class="pb pb-down" data-play="down" data-lane="${t}">▼ Improvise</button>` : ''}
   </div>`;
 }
 

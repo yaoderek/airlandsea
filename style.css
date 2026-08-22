@@ -236,6 +236,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .pb { padding: 4px 10px; font-size: 12.5px; }
 .pb-up { background: #2e3a2a; color: #e8eddc; }
 .pb-down { background: #3d3527; color: #e8dfc7; }
+.pb-blocked { font-size: 12px; font-weight: 700; color: #7c2d12; opacity: .8; }
 
 .tile.target { cursor: pointer; }
 .tile-hint {

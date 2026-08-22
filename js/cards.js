@@ -10,7 +10,7 @@ export const CARDS = [
   { id: 'A2', theater: 'air',  str: 2, name: 'Air Drop',         kind: 'instant', text: 'On your next turn, you may deploy face-up to any lane.' },
   { id: 'A3', theater: 'air',  str: 3, name: 'Maneuver',         kind: 'instant', text: 'Flip an uncovered card in a lane next to this one.' },
   { id: 'A4', theater: 'air',  str: 4, name: 'Aerodrome',        kind: 'ongoing', text: 'You may deploy cards of strength 3 or less face-up to any lane.' },
-  { id: 'A5', theater: 'air',  str: 5, name: 'Containment',      kind: 'ongoing', text: 'Any card played face-down is destroyed instead.' },
+  { id: 'A5', theater: 'air',  str: 5, name: 'Containment',      kind: 'ongoing', text: 'Nobody may play cards face-down.' },
   { id: 'A6', theater: 'air',  str: 6, name: 'Heavy Bombers',    kind: 'none',    text: 'No ability — 6 raw strength.' },
   { id: 'L1', theater: 'land', str: 1, name: 'Reinforce',        kind: 'instant', text: 'Peek at the top deck card. You may play it face-down to a lane next to this one.' },
   { id: 'L2', theater: 'land', str: 2, name: 'Ambush',           kind: 'instant', text: 'Flip any uncovered card, anywhere.' },
@@ -22,7 +22,7 @@ export const CARDS = [
   { id: 'S2', theater: 'sea',  str: 2, name: 'Escalation',       kind: 'ongoing', text: 'Your face-down cards are strength 4.' },
   { id: 'S3', theater: 'sea',  str: 3, name: 'Maneuver',         kind: 'instant', text: 'Flip an uncovered card in a lane next to this one.' },
   { id: 'S4', theater: 'sea',  str: 4, name: 'Redeploy',         kind: 'instant', text: 'Return one of your face-down cards to your hand. If you do, take another turn.' },
-  { id: 'S5', theater: 'sea',  str: 5, name: 'Blockade',         kind: 'ongoing', text: 'A card played into a lane next to this one holding 3+ cards is destroyed.' },
+  { id: 'S5', theater: 'sea',  str: 5, name: 'Blockade',         kind: 'ongoing', text: 'No cards may be played into a lane next to this one while it holds 3+ cards.' },
   { id: 'S6', theater: 'sea',  str: 6, name: 'Super Battleship', kind: 'none',    text: 'No ability — 6 raw strength.' },
 ];
 

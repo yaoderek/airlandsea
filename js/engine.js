@@ -117,7 +117,20 @@ export function strength(st, t, p) {
   return total;
 }
 
+// House rule: Containment and Blockade prevent plays rather than destroying
+// the played card. A lane is closed if a Blockade watches it and it already
+// holds 3+ cards (both players combined).
+export function laneOpen(st, t) {
+  const occupied = st.board[t][0].length + st.board[t][1].length;
+  return !(occupied >= 3 && blockadedTheaters(st).has(t));
+}
+
+export function canPlayFaceDown(st, t) {
+  return laneOpen(st, t) && !hasOngoing(st, 'Containment');
+}
+
 export function canPlayFaceUp(st, p, card, t) {
+  if (!laneOpen(st, t)) return false;
   if (card.theater === t) return true;
   if (st.airDrop[p]) return true;
   if (card.str <= 3 && hasOngoing(st, 'Aerodrome', p)) return true;
@@ -177,25 +190,15 @@ function play(st, p, a) {
   const c = byId[a.card];
   const t = a.theater;
   if (!st.order.includes(t)) return 'Unknown lane.';
+  if (!laneOpen(st, t)) return `Blockade: ${cap(t)} is full and can't be played into.`;
+  if (a.faceDown && hasOngoing(st, 'Containment')) {
+    return 'Containment prevents face-down plays.';
+  }
   if (!a.faceDown && !canPlayFaceUp(st, p, c, t)) {
     return `${c.name} can only deploy face-up to ${cap(c.theater)}.`;
   }
   st.airDrop[p] = false; // a pending Air Drop is spent by your next play, used or not
   st.hands[p].splice(hi, 1);
-
-  if (a.faceDown && hasOngoing(st, 'Containment')) {
-    st.discard.push(c.id);
-    addLog(st, `P${p + 1} improvised a card — destroyed by Containment.`);
-    return finishTurn(st);
-  }
-  const occupied = st.board[t][0].length + st.board[t][1].length;
-  if (occupied >= 3 && blockadedTheaters(st).has(t)) {
-    st.discard.push(c.id);
-    addLog(st, a.faceDown
-      ? `P${p + 1}'s face-down card was destroyed by the Blockade on ${cap(t)}.`
-      : `P${p + 1}'s ${c.name} was destroyed by the Blockade on ${cap(t)}.`);
-    return finishTurn(st);
-  }
 
   st.board[t][p].push({ id: c.id, faceUp: !a.faceDown });
   addLog(st, a.faceDown
@@ -224,13 +227,17 @@ function pushInstant(st, p, c, t) {
     case 'Disrupt':
       st.stack.push({ type: 'disrupt', player: p, first: p, stage: 0, skippable: false });
       return;
-    case 'Reinforce':
-      if (st.deck.length) {
+    case 'Reinforce': {
+      // The reinforcement is a face-down play, so Containment/Blockade rules apply.
+      const options = hasOngoing(st, 'Containment') ? []
+        : adjacent(st, t).filter(x => laneOpen(st, x));
+      if (st.deck.length && options.length) {
         st.stack.push({ type: 'reinforce', player: p, card: st.deck[0],
-          options: adjacent(st, t), skippable: true,
+          options, skippable: true,
           label: 'Reinforce: play the top deck card face-down to an adjacent lane' });
       }
       return;
+    }
     case 'Transport':
       st.stack.push({ type: 'transport-pick', player: p, skippable: true,
         label: 'Transport: choose one of your cards to move' });
@@ -322,21 +329,10 @@ function resolvePending(st, a) {
       return pump(st);
     }
     case 'reinforce': {
-      if (!pd.options.includes(a.theater)) return 'Not an adjacent lane.';
+      if (!pd.options.includes(a.theater)) return 'Not a legal lane for the reinforcement.';
       st.stack.pop();
       const id = st.deck.shift();
       const p = pd.player;
-      if (hasOngoing(st, 'Containment')) {
-        st.discard.push(id);
-        addLog(st, `P${p + 1}'s reinforcement was destroyed by Containment.`);
-        return pump(st);
-      }
-      const occupied = st.board[a.theater][0].length + st.board[a.theater][1].length;
-      if (occupied >= 3 && blockadedTheaters(st).has(a.theater)) {
-        st.discard.push(id);
-        addLog(st, `P${p + 1}'s reinforcement was destroyed by the Blockade on ${cap(a.theater)}.`);
-        return pump(st);
-      }
       st.board[a.theater][p].push({ id, faceUp: false });
       addLog(st, `P${p + 1} reinforced ${cap(a.theater)} with a face-down card.`);
       return pump(st);

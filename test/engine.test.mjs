@@ -1,7 +1,7 @@
 // Engine tests: node test/engine.test.mjs
 import assert from 'node:assert/strict';
 import {
-  newGame, applyAction, viewFor, strength, canPlayFaceUp, activePlayer,
+  newGame, applyAction, viewFor, strength, canPlayFaceUp, canPlayFaceDown, activePlayer,
 } from '../js/engine.js';
 import { byId, CARDS } from '../js/cards.js';
 
@@ -96,18 +96,19 @@ test('Maneuver flips an uncovered card in an adjacent lane', () => {
   assert.equal(st.turn, 1);
 });
 
-test('Containment destroys face-down plays', () => {
+test('Containment prevents face-down plays entirely', () => {
   const st = bareState();
   put(st, 'air', 1, 'A5', true); // opponent's Containment
   st.hands[0] = ['L6'];
   st.hands[1] = ['S6'];
-  assert.equal(applyAction(st, 0, { t: 'play', card: 'L6', theater: 'sea', faceDown: true }), null);
-  assert.deepEqual(st.discard, ['L6']);
-  assert.equal(st.board.sea[0].length, 0);
-  assert.equal(st.turn, 1); // the turn is still spent
+  assert.ok(!canPlayFaceDown(st, 'sea'));
+  assert.ok(applyAction(st, 0, { t: 'play', card: 'L6', theater: 'sea', faceDown: true })); // rejected
+  assert.deepEqual(st.hands[0], ['L6']); // card kept, turn not spent
+  assert.equal(st.turn, 0);
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L6', theater: 'land', faceDown: false }), null); // face-up still fine
 });
 
-test('Blockade destroys plays into a full adjacent lane', () => {
+test('Blockade prevents any play into a full adjacent lane', () => {
   const st = bareState();
   put(st, 'sea', 1, 'S5', true); // Blockade; adjacent lane is land
   put(st, 'land', 0, 'L6', true);
@@ -115,9 +116,32 @@ test('Blockade destroys plays into a full adjacent lane', () => {
   put(st, 'land', 1, 'L2', false);
   st.hands[0] = ['L4'];
   st.hands[1] = ['S6'];
-  assert.equal(applyAction(st, 0, { t: 'play', card: 'L4', theater: 'land', faceDown: false }), null);
-  assert.deepEqual(st.discard, ['L4']);
+  assert.ok(!canPlayFaceUp(st, 0, byId.L4, 'land'));
+  assert.ok(!canPlayFaceDown(st, 'land'));
+  assert.ok(applyAction(st, 0, { t: 'play', card: 'L4', theater: 'land', faceDown: false })); // rejected
+  assert.deepEqual(st.hands[0], ['L4']);
   assert.equal(st.board.land[0].length, 1);
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L4', theater: 'air', faceDown: true }), null); // elsewhere ok
+});
+
+test('Reinforce only offers lanes that are legal for a face-down play', () => {
+  const st = bareState();
+  put(st, 'sea', 1, 'S5', true); // Blockade watching land
+  put(st, 'land', 0, 'L6', true);
+  put(st, 'land', 1, 'L2', true);
+  put(st, 'land', 1, 'S6', false); // land now holds 3 → closed
+  put(st, 'air', 0, 'A4', true);   // Aerodrome lets Reinforce (str 1) deploy to air
+  st.deck = ['A6'];
+  st.hands[0] = ['L1', 'L4'];
+  st.hands[1] = ['S1'];
+  // Playing into the closed lane itself is rejected outright.
+  assert.ok(applyAction(st, 0, { t: 'play', card: 'L1', theater: 'land', faceDown: false }));
+  // Deploy Reinforce to air instead: its only adjacent lane (land) is closed,
+  // so no reinforce prompt appears and the deck card stays put.
+  assert.equal(applyAction(st, 0, { t: 'play', card: 'L1', theater: 'air', faceDown: false }), null);
+  assert.equal(st.pending, null);
+  assert.equal(st.deck.length, 1);
+  assert.equal(st.turn, 1);
 });
 
 test('Aerodrome lets strength ≤3 deploy anywhere; Air Drop lets anything', () => {
@@ -294,7 +318,9 @@ function legalActions(st) {
   const acts = [{ actor: p, a: { t: 'withdraw' } }];
   for (const card of st.hands[p]) {
     for (const t of st.order) {
-      acts.push({ actor: p, a: { t: 'play', card, theater: t, faceDown: true } });
+      if (canPlayFaceDown(st, t)) {
+        acts.push({ actor: p, a: { t: 'play', card, theater: t, faceDown: true } });
+      }
       if (canPlayFaceUp(st, p, byId[card], t)) {
         acts.push({ actor: p, a: { t: 'play', card, theater: t, faceDown: false } });
       }
