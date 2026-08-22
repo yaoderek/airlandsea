@@ -59,7 +59,7 @@ test('ambush flip of an enemy card yields a flip event with the ambusher as acto
   applyAction(st, 0, { t: 'play', card: 'L2', theater: 'land' }); // Ambush, pending flip
   const [a, b] = step(st, 0, { t: 'pick', ref: { t: 'sea', p: 1, i: 0 } });
   const evs = diffViews(a, b);
-  assert.deepEqual(evs, [{ type: 'flip', ref: { t: 'sea', p: 1, i: 0 }, id: 'L6', faceUp: true, actor: 0 }]);
+  assert.deepEqual(evs, [{ type: 'flip', ref: { t: 'sea', p: 1, i: 0 }, id: 'L6', faceUp: true, actor: 0, via: 'Ambush' }]);
 });
 
 test('redeploy yields a redeploy event', () => {
@@ -79,7 +79,7 @@ test('transport yields a move event', () => {
   const [a, b] = step(st, 0, { t: 'pick', theater: 'land' });
   const evs = diffViews(a, b);
   assert.deepEqual(evs, [{ type: 'move', player: 0, from: { t: 'air', p: 0, i: 0 },
-    to: { t: 'land', p: 0, i: 0 }, id: 'A2', faceUp: false, flipped: false }]);
+    to: { t: 'land', p: 0, i: 0 }, id: 'A2', faceUp: false, flipped: false, via: 'Transport' }]);
 });
 
 test('reinforce yields a reinforce event', () => {
@@ -89,6 +89,15 @@ test('reinforce yields a reinforce event', () => {
   const [a, b] = step(st, 0, { t: 'pick', theater: 'air' });
   const evs = diffViews(a, b);
   assert.deepEqual(evs, [{ type: 'reinforce', player: 0, ref: { t: 'air', p: 0, i: 0 }, id: 'A3' }]);
+});
+
+test('conscription deploy yields play + draw events, not reinforce', () => {
+  const st = midState();
+  st.hands[0].push('Y5'); // Conscription: add the top deck card to hand
+  const [a, b] = step(st, 0, { t: 'play', card: 'Y5', theater: 'land' });
+  const evs = diffViews(a, b);
+  assert.deepEqual(evs.map(e => e.type).sort(), ['draw', 'play']);
+  assert.deepEqual(evs.find(e => e.type === 'draw'), { type: 'draw', player: 0, count: 1 });
 });
 
 test('air drop deploy yields play + airdrop events', () => {

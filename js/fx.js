@@ -554,13 +554,15 @@ function paradrop(toRect, card, reveal) {
   });
 }
 
-// Transport / Jet Stream: a steamboat ferries the card between lanes.
-function boatMove(fromRect, toRect, card, faceUp, reveal) {
+// Transport / Amphibious Assault: a steamboat ferries the card between lanes.
+// `flipped` cards ride showing their back and turn over as they hop ashore.
+function boatMove(fromRect, toRect, card, faceUp, flipped, reveal) {
   const from = center(fromRect), to = center(toRect);
   const boat = makeBoat();
   const dir = to.x >= from.x ? 1 : -1;
   boat.scale.x = dir;
   const mesh = makeCard(card, faceUp);
+  if (flipped) mesh.rotation.y = Math.PI;
   stage.scene.add(mesh);
   const wave = makeSprite(softTexture(), 0x46a5c4);
   wave.material.opacity = 0.55;
@@ -586,6 +588,7 @@ function boatMove(fromRect, toRect, card, faceUp, reveal) {
       } else if (t < dur + 0.3) { // card hops ashore
         const k = easeOut((t - dur) / 0.3);
         put(mesh, lerp(to.x - dir * 6, to.x, k), lerp(to.y - 18, to.y, k), 22);
+        if (flipped) mesh.rotation.y = Math.PI * (1 - k);
         put(boat, to.x + dir * k * 130, to.y + 6 + k * 26, 20);
         boat.traverse(o => { if (o.material) { o.material.transparent = true; o.material.opacity = 1 - k; } });
         wave.material.opacity = 0.55 * (1 - k);
@@ -730,6 +733,746 @@ function flyover(boardRect) {
   });
 }
 
+// ---------- small building blocks for flourishes ----------
+
+function delay(d, fn) {
+  spawn({ update(t) { if (t >= d) { fn(); return false; } return true; } });
+}
+
+function ringPulse(x, y, { color = 0xd9b45b, radius = 90, dur = 0.6, after = 0 } = {}) {
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 40),
+    new THREE.MeshBasicMaterial({ color, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+  ring.visible = false;
+  put(ring, x, y, 34);
+  stage.scene.add(ring);
+  spawn({
+    update(t) {
+      if (t < after) return true;
+      const k = clamp01((t - after) / dur);
+      ring.visible = true;
+      const s = lerp(6, radius, easeOut(k));
+      ring.scale.set(s, s, 1);
+      ring.material.opacity = 0.85 * (1 - k);
+      return k < 1;
+    },
+    dispose() { disposeMesh(ring); },
+  });
+}
+
+// A stretched glowing smear that travels from (x,y) by (dx,dy). Tracer fire,
+// wind gusts, strafing runs.
+function streak(x, y, { dx = 260, dy = 0, len = 90, thick = 9, color = 0xffffff, dur = 0.4, after = 0 } = {}) {
+  const s = makeSprite(softTexture(), color, true);
+  s.visible = false;
+  s.material.rotation = Math.atan2(-dy, dx);
+  spawn({
+    update(t) {
+      if (t < after) return true;
+      const k = clamp01((t - after) / dur);
+      s.visible = true;
+      put(s, x + dx * k, y + dy * k, 36);
+      s.scale.set(len, thick, 1);
+      s.material.opacity = 0.75 * (1 - k);
+      return k < 1;
+    },
+    dispose() { stage.scene.remove(s); s.material.dispose(); },
+  });
+}
+
+// A shell that arcs from a to b, then calls impact().
+function shellArc(a, b, { dur = 0.45, after = 0, impact = null } = {}) {
+  const shell = new THREE.Mesh(new THREE.CapsuleGeometry(2.6, 9, 3, 6),
+    new THREE.MeshLambertMaterial({ color: 0x33362e }));
+  shell.visible = false;
+  stage.scene.add(shell);
+  const apex = Math.min(a.y, b.y) - 90;
+  spawn({
+    update(t) {
+      if (t < after) return true;
+      const k = clamp01((t - after) / dur);
+      shell.visible = true;
+      const x = lerp(a.x, b.x, k);
+      const m = 4 * k * (1 - k);
+      const y = lerp(a.y, b.y, k) - m * (Math.min(a.y, b.y) - apex);
+      put(shell, x, y, 42);
+      shell.rotation.z = Math.atan2(-(b.y - a.y), b.x - a.x) + (k - 0.5) * 1.6 - Math.PI / 2;
+      if (k >= 1 && impact) { impact(); return false; }
+      return k < 1;
+    },
+    dispose() { disposeMesh(shell); },
+  });
+}
+
+// A searchlight ellipse sweeping across an area (Spotter, Scout Report…).
+function sweepLight(area, { color = 0xfff2c0, dur = 0.9 } = {}) {
+  const s = makeSprite(softTexture(), color, true);
+  spawn({
+    update(t) {
+      const k = clamp01(t / dur);
+      put(s, lerp(area.left + 40, area.right - 40, easeIO(k)), area.top + area.height / 2, 34);
+      s.scale.set(150, area.height * 0.95, 1);
+      s.material.opacity = 0.35 * Math.sin(Math.PI * k);
+      return k < 1;
+    },
+    dispose() { stage.scene.remove(s); s.material.dispose(); },
+  });
+}
+
+// ---------- more vehicles ----------
+
+function makeTank() {
+  const g = new THREE.Group();
+  const olive = new THREE.MeshLambertMaterial({ color: 0x5f6b46 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x363c2c });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(46, 12, 18), olive);
+  g.add(hull);
+  const skirt = new THREE.Mesh(new THREE.BoxGeometry(48, 7, 19), dark);
+  skirt.position.y = -8;
+  g.add(skirt);
+  const turret = new THREE.Mesh(new THREE.BoxGeometry(21, 10, 14), olive);
+  turret.position.set(-3, 10, 0);
+  g.add(turret);
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 26, 8), dark);
+  barrel.rotation.z = Math.PI / 2;
+  barrel.position.set(18, 12, 0);
+  g.add(barrel);
+  stage.scene.add(g);
+  return g;
+}
+
+function makeZeppelin() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(15, 14, 10),
+    new THREE.MeshLambertMaterial({ color: 0xa8aba4 }));
+  body.scale.set(2.3, 0.78, 0.78);
+  g.add(body);
+  const finMat = new THREE.MeshLambertMaterial({ color: 0x7c8078 });
+  const finV = new THREE.Mesh(new THREE.BoxGeometry(12, 16, 2), finMat);
+  finV.position.set(-30, 0, 0);
+  g.add(finV);
+  const finH = new THREE.Mesh(new THREE.BoxGeometry(12, 2, 16), finMat);
+  finH.position.set(-30, 0, 0);
+  g.add(finH);
+  const gondola = new THREE.Mesh(new THREE.BoxGeometry(13, 5, 6),
+    new THREE.MeshLambertMaterial({ color: 0x40453c }));
+  gondola.position.set(3, -13, 0);
+  g.add(gondola);
+  stage.scene.add(g);
+  return g;
+}
+
+function makeTruck() {
+  const g = new THREE.Group();
+  const olive = new THREE.MeshLambertMaterial({ color: 0x6b7451 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x3a3f35 });
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(30, 12, 14), olive);
+  bed.position.set(-8, 2, 0);
+  g.add(bed);
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(13, 13, 13), new THREE.MeshLambertMaterial({ color: 0x59634a }));
+  cab.position.set(14, 3, 0);
+  g.add(cab);
+  for (const wx of [-16, -2, 13]) {
+    const wheel = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 4, 10), dark);
+    wheel.rotation.x = Math.PI / 2;
+    wheel.position.set(wx, -6, 8);
+    g.add(wheel);
+  }
+  stage.scene.add(g);
+  return g;
+}
+
+function makeGlider() {
+  const g = new THREE.Group();
+  const pale = new THREE.MeshLambertMaterial({ color: 0xb8b3a2 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(4.5, 24, 4, 8), pale);
+  body.rotation.z = Math.PI / 2;
+  g.add(body);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(30, 2.5, 12), pale);
+  wing.position.set(2, 4, 0);
+  wing.rotation.z = 0.06;
+  g.add(wing);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(7, 9, 2), pale);
+  fin.position.set(-15, 6, 0);
+  g.add(fin);
+  stage.scene.add(g);
+  return g;
+}
+
+function makeMine() {
+  const g = new THREE.Group();
+  const dark = new THREE.MeshLambertMaterial({ color: 0x2f3430 });
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(13, 12, 10), dark));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(2.6, 8, 6), dark);
+    spike.position.set(Math.cos(a) * 13, Math.sin(a) * 13, 0);
+    spike.rotation.z = a - Math.PI / 2;
+    g.add(spike);
+  }
+  stage.scene.add(g);
+  return g;
+}
+
+// ---------- alternate move rides ----------
+
+// Glider Drop / moves into the air lane: a silent swoop.
+function gliderMove(fromRect, toRect, card, faceUp, flipped, reveal) {
+  const from = center(fromRect), to = center(toRect);
+  const glider = makeGlider();
+  const dir = to.x >= from.x ? 1 : -1;
+  const mesh = makeCard(card, faceUp);
+  if (flipped) mesh.rotation.y = Math.PI;
+  stage.scene.add(mesh);
+  const apex = Math.min(from.y, to.y) - 120;
+  const dur = 1.25;
+  spawn({
+    update(t) {
+      if (t < dur) {
+        const k = easeIO(clamp01(t / dur));
+        const x = lerp(from.x, to.x, k);
+        const m = 4 * k * (1 - k);
+        const y = lerp(from.y, to.y, k) - m * (Math.min(from.y, to.y) - apex);
+        put(glider, x, y - 34, 40);
+        glider.scale.x = dir;
+        glider.rotation.z = Math.sin(k * Math.PI) * 0.2 * dir;
+        put(mesh, x, y, 38);
+        mesh.rotation.z = glider.rotation.z * 0.6;
+        if (flipped) mesh.rotation.y = Math.PI * (1 - clamp01((k - 0.6) / 0.4));
+      } else {
+        if (mesh.visible) {
+          mesh.visible = false;
+          reveal();
+          puff(to.x, to.y, { color: 0x8a8265, count: 5, size: 20, rise: 10, life: 0.4 });
+        }
+        const k = clamp01((t - dur) / 0.4);
+        put(glider, to.x + dir * k * 200, to.y - 34 + k * 90, 40);
+        glider.traverse(o => { if (o.material) { o.material.transparent = true; o.material.opacity = 1 - k; } });
+      }
+      return t < dur + 0.4;
+    },
+    dispose() { reveal(); disposeMesh(mesh); disposeMesh(glider); },
+  });
+}
+
+// Land moves: an army truck with the card in the bed.
+function truckMove(fromRect, toRect, card, faceUp, flipped, reveal) {
+  const from = center(fromRect), to = center(toRect);
+  const truck = makeTruck();
+  const dir = to.x >= from.x ? 1 : -1;
+  truck.scale.x = dir;
+  const mesh = makeCard(card, faceUp, 46, 64);
+  if (flipped) mesh.rotation.y = Math.PI;
+  stage.scene.add(mesh);
+  const dur = Math.max(0.8, Math.min(1.5, Math.hypot(to.x - from.x, to.y - from.y) / 420));
+  let lastDust = 0;
+  spawn({
+    update(t) {
+      if (t < dur) {
+        const k = easeIO(clamp01(t / dur));
+        const x = lerp(from.x, to.x, k);
+        const y = lerp(from.y, to.y, k) + Math.sin(t * 22) * 1.2;
+        put(truck, x, y + 8, 20);
+        put(mesh, x - dir * 9, y - 12, 22);
+        mesh.rotation.z = -0.12 * dir;
+        if (t - lastDust > 0.11 && k > 0.03 && k < 0.97) {
+          lastDust = t;
+          puff(x - dir * 30, y + 14, { color: 0x6e6450, count: 2, size: 15, speed: 25, rise: 12, life: 0.5 });
+        }
+      } else if (t < dur + 0.28) {
+        const k = easeOut((t - dur) / 0.28);
+        put(mesh, lerp(to.x - dir * 9, to.x, k), lerp(to.y - 12, to.y, k), 22);
+        mesh.rotation.z = -0.12 * dir * (1 - k);
+        if (flipped) mesh.rotation.y = Math.PI * (1 - k);
+        put(truck, to.x + dir * k * 140, to.y + 8, 20);
+        truck.traverse(o => { if (o.material) { o.material.transparent = true; o.material.opacity = 1 - k; } });
+      } else if (mesh.visible) {
+        mesh.visible = false;
+        reveal();
+        puff(to.x, to.y, { color: 0x8a8265, count: 4, size: 16, rise: 8, life: 0.4 });
+      }
+      return t < dur + 0.34;
+    },
+    dispose() { reveal(); disposeMesh(mesh); disposeMesh(truck); },
+  });
+}
+
+// Drift Mine: the disguised card drifts over as a naval mine.
+function mineMove(fromRect, toRect, reveal) {
+  const from = center(fromRect), to = center(toRect);
+  const mine = makeMine();
+  const dur = 1.35;
+  let lastBubble = 0;
+  spawn({
+    update(t) {
+      if (t < dur) {
+        const k = easeIO(clamp01(t / dur));
+        const x = lerp(from.x, to.x, k);
+        const y = lerp(from.y, to.y, k) + Math.sin(t * 5) * 4;
+        put(mine, x, y, 22);
+        mine.rotation.z = t * 0.8;
+        if (t - lastBubble > 0.12) {
+          lastBubble = t;
+          puff(x, y + 10, { color: 0xdfeef5, count: 1, size: 10, speed: 12, rise: 18, life: 0.5 });
+        }
+      } else if (mine.visible) {
+        mine.visible = false;
+        reveal();
+        puff(to.x, to.y, { color: 0xdfeef5, count: 6, size: 18, rise: 10, life: 0.45 });
+      }
+      return t < dur + 0.1;
+    },
+    dispose() { reveal(); disposeMesh(mine); },
+  });
+}
+
+// Jet Stream: the card is blown tumbling to the next lane on a gust.
+function gustMove(fromRect, toRect, card, faceUp, flipped, reveal) {
+  const from = center(fromRect), to = center(toRect);
+  const mesh = makeCard(card, faceUp);
+  if (flipped) mesh.rotation.y = Math.PI;
+  stage.scene.add(mesh);
+  const dir = to.x >= from.x ? 1 : -1;
+  const dur = 0.75;
+  for (let i = 0; i < 4; i++) {
+    streak(from.x - dir * 40, from.y + r(-26, 26), {
+      dx: (to.x - from.x) * 1.3, dy: (to.y - from.y) * r(0.7, 1.3),
+      len: 120, color: 0xdfeef5, dur: 0.5, after: i * 0.09 });
+  }
+  spawn({
+    update(t) {
+      const k = easeOut(clamp01(t / dur));
+      put(mesh, lerp(from.x, to.x, k), lerp(from.y, to.y, k) - Math.sin(k * Math.PI) * 30, 30);
+      mesh.rotation.z = dir * (1 - k) * 6 * Math.sin(t * 14);
+      if (flipped) mesh.rotation.y = Math.PI * (1 - k);
+      if (t >= dur && mesh.visible) {
+        mesh.visible = false;
+        reveal();
+        puff(to.x, to.y, { color: 0xdfeef5, count: 5, size: 16, rise: 8, life: 0.4 });
+      }
+      return t < dur + 0.05;
+    },
+    dispose() { reveal(); disposeMesh(mesh); },
+  });
+}
+
+// Conscription: a card zips from the deck counter into the hand.
+function drawFly(from, to, reveal) {
+  const mesh = makeCard(null, false, 44, 60);
+  stage.scene.add(mesh);
+  const apex = Math.min(from.y, to.y) - 70;
+  const dur = 0.55;
+  spawn({
+    update(t) {
+      const k = easeIO(clamp01(t / dur));
+      const m = 4 * k * (1 - k);
+      put(mesh, lerp(from.x, to.x, k),
+        lerp(from.y, to.y, k) - m * (Math.min(from.y, to.y) - apex), 40);
+      mesh.rotation.z = k * Math.PI * 2 * (to.x >= from.x ? -0.5 : 0.5);
+      mesh.scale.setScalar(lerp(0.7, 1.3, k));
+      if (t >= dur && mesh.visible) {
+        mesh.visible = false;
+        reveal();
+        puff(to.x, to.y, { color: 0xd9b45b, count: 4, size: 16, rise: 8, life: 0.35 });
+      }
+      return t < dur + 0.05;
+    },
+    dispose() { reveal(); disposeMesh(mesh); },
+  });
+}
+
+// ---------- per-card deploy flourishes ----------
+// Each runs shortly after the card lands (deploy or flip-up reveal).
+// o = { rect, lane, ev, next, after, me }
+
+function zoneAcross(o) { // the zone the card's enemy plays into, viewer-adjusted
+  const L = o.lane;
+  const mine = o.ev.player === o.me;
+  return mine
+    ? { left: L.left, right: L.right, top: L.top, height: L.height * 0.38 }
+    : { left: L.left, right: L.right, top: L.top + L.height * 0.62, height: L.height * 0.38 };
+}
+
+function fxSupport(o) {
+  const c = center(o.rect);
+  for (let i = 0; i < 3; i++) {
+    ringPulse(c.x, c.y, { color: 0xd9b45b, radius: 110 + i * 45, dur: 0.7, after: i * 0.16 });
+  }
+}
+
+function fxBeacon(o) {
+  const c = center(o.rect);
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(24, 120, 3),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending }));
+  beam.geometry.translate(0, 60, 0); // pivot at the apex
+  const g = new THREE.Group();
+  g.add(beam);
+  put(g, c.x, c.y, 34);
+  stage.scene.add(g);
+  spawn({
+    update(t) {
+      const k = clamp01(t / 1.3);
+      g.rotation.z = easeIO(k) * Math.PI * 2.5;
+      beam.material.opacity = 0.45 * Math.sin(Math.PI * Math.min(1, k * 1.15));
+      return k < 1;
+    },
+    dispose() { disposeMesh(g); },
+  });
+}
+
+function fxLockdown(o) {
+  const c = { x: o.lane.left + o.lane.width / 2, y: o.lane.top + o.lane.height / 2 };
+  const mat = new THREE.MeshBasicMaterial({ color: 0xd23b2f, transparent: true, opacity: 0, depthWrite: false });
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.74, 1, 44), mat);
+  ring.scale.set(52, 52, 1);
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(84, 13, 2), mat);
+  bar.rotation.z = -Math.PI / 4;
+  g.add(ring, bar);
+  put(g, c.x, c.y, 44);
+  stage.scene.add(g);
+  let slammed = false;
+  spawn({
+    update(t) {
+      if (t < 0.3) {
+        const k = easeIn(t / 0.3);
+        const s = lerp(2.6, 1, k);
+        g.scale.set(s, s, 1);
+        mat.opacity = k;
+      } else {
+        if (!slammed) { slammed = true; shakeBoard(); puff(c.x, c.y, { color: 0xb0483c, count: 6, size: 24, life: 0.5 }); }
+        g.scale.set(1, 1, 1);
+        mat.opacity = 0.95 * (1 - easeIn(clamp01((t - 0.85) / 0.35)));
+      }
+      return t < 1.2;
+    },
+    dispose() { disposeMesh(g); },
+  });
+}
+
+function fxBombingRun(o) {
+  const L = o.lane;
+  const y = o.rect.top - 70;
+  const plane = makePlane(1.25);
+  plane.traverse(m => { if (m.material) m.material.color?.multiplyScalar(0.55); });
+  const dropped = [];
+  const dur = 1.5;
+  spawn({
+    update(t, dt) {
+      plane.userData.prop.rotation.x += dt * 40;
+      const k = clamp01(t / dur);
+      const x = lerp(L.left - 120, L.right + 120, k);
+      put(plane, x, y + Math.sin(t * 6) * 3, 44);
+      for (const n of [0.3, 0.45, 0.6]) {
+        if (k > n && !dropped.includes(n)) {
+          dropped.push(n);
+          const bx = x, target = { x: bx + 14, y: o.rect.top + r(-6, 18) };
+          shellArc({ x: bx, y }, target, {
+            dur: 0.4,
+            impact: () => {
+              const f = makeSprite(flashTexture(), 0xffffff, true);
+              put(f, target.x, target.y, 46);
+              spawn({ update(tt) { const kk = clamp01(tt / 0.22); f.scale.set(lerp(8, 70, easeOut(kk)), lerp(8, 70, easeOut(kk)), 1); f.material.opacity = 1 - kk; return kk < 1; },
+                dispose() { stage.scene.remove(f); f.material.dispose(); } });
+              puff(target.x, target.y, { color: 0x6f6a5c, count: 5, size: 22, rise: 30, life: 0.6 });
+              if (n === 0.45) shakeBoard();
+            } });
+        }
+      }
+      return k < 1;
+    },
+    dispose() { disposeMesh(plane); },
+  });
+}
+
+function fxCoverFire(o) {
+  const R = o.rect;
+  const up = o.ev.player === o.me ? -1 : 1; // toward the enemy's side
+  for (let i = 0; i < 6; i++) {
+    streak(r(R.left + 12, R.right - 12), R.top + R.height / 2, {
+      dx: r(-35, 35), dy: up * r(120, 190), len: 55, thick: 6,
+      color: 0xffd98a, dur: 0.3, after: i * 0.07 });
+  }
+}
+
+function fxLightning(o) {
+  const L = o.lane, c = center(o.rect);
+  const pts = [];
+  const n = 7;
+  for (let i = 0; i <= n; i++) {
+    const k = i / n;
+    const x = c.x + (i === 0 || i === n ? 0 : r(-26, 26));
+    pts.push(new THREE.Vector3(x, -lerp(L.top - 10, c.y, k), 45));
+  }
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0xfff7b0, transparent: true, blending: THREE.AdditiveBlending }));
+  stage.scene.add(line);
+  const f = makeSprite(flashTexture(), 0xfff7b0, true);
+  put(f, c.x, c.y, 46);
+  shakeBoard();
+  spawn({
+    update(t) {
+      line.visible = (t < 0.07) || (t > 0.12 && t < 0.2) || (t > 0.24 && t < 0.38);
+      line.material.opacity = 1 - clamp01(t / 0.4);
+      const k = clamp01(t / 0.3);
+      f.scale.set(lerp(10, 90, easeOut(k)), lerp(10, 90, easeOut(k)), 1);
+      f.material.opacity = 0.9 * (1 - k);
+      return t < 0.4;
+    },
+    dispose() { disposeMesh(line); stage.scene.remove(f); f.material.dispose(); },
+  });
+}
+
+function fxTankRoll(o) {
+  const L = o.lane, y = center(o.rect).y;
+  const tank = makeTank();
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const x0 = dir > 0 ? L.left - 70 : L.right + 70;
+  const x1 = dir > 0 ? L.right + 70 : L.left - 70;
+  const dur = 1.5;
+  let lastDust = 0;
+  spawn({
+    update(t) {
+      const k = clamp01(t / dur);
+      const x = lerp(x0, x1, easeIO(k));
+      put(tank, x, y + Math.sin(t * 18) * 1.4, 24);
+      tank.scale.x = dir;
+      tank.rotation.z = Math.sin(t * 9) * 0.02;
+      const fade = Math.min(1, Math.min(k, 1 - k) * 8);
+      tank.traverse(m => { if (m.material) { m.material.transparent = true; m.material.opacity = fade; } });
+      if (t - lastDust > 0.1 && k > 0.05 && k < 0.95) {
+        lastDust = t;
+        puff(x - dir * 28, y + 10, { color: 0x6e6450, count: 2, size: 16, speed: 20, rise: 10, life: 0.5 });
+      }
+      return k < 1;
+    },
+    dispose() { disposeMesh(tank); },
+  });
+}
+
+function fxChevrons(o) {
+  // golden chevrons rise from every one of the player's face-down cards
+  for (const t of o.next.order) {
+    o.next.board[t][o.ev.player].forEach((e, i) => {
+      if (e.faceUp) return;
+      const strip = o.after.strips.get(refKey({ t, p: o.ev.player, i }));
+      if (!strip) return;
+      const c = center(strip.r);
+      for (let j = 0; j < 3; j++) {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(7, 11, 4),
+          new THREE.MeshBasicMaterial({ color: 0xd9b45b, transparent: true, depthWrite: false }));
+        cone.visible = false;
+        stage.scene.add(cone);
+        const after = j * 0.14;
+        spawn({
+          update(tt) {
+            if (tt < after) return true;
+            const k = clamp01((tt - after) / 0.6);
+            cone.visible = true;
+            put(cone, c.x + (j - 1) * 16, c.y - k * 34, 36);
+            cone.material.opacity = 0.9 * (1 - k);
+            return k < 1;
+          },
+          dispose() { disposeMesh(cone); },
+        });
+      }
+    });
+  }
+}
+
+function fxChainDrop(o) {
+  const idx = o.next.order.indexOf(o.ev.ref.t);
+  const adjacent = [o.next.order[idx - 1], o.next.order[idx + 1]].filter(Boolean);
+  adjacent.forEach((t, li) => {
+    const lane = o.after.lanes.get(t);
+    if (!lane) return;
+    const c = { x: lane.r.left + lane.r.width / 2, y: lane.r.top + lane.r.height / 2 };
+    const chain = new THREE.Group();
+    const dark = new THREE.MeshLambertMaterial({ color: 0x3a3f3d, transparent: true });
+    for (let i = 0; i < 7; i++) {
+      const link = new THREE.Mesh(new THREE.TorusGeometry(5.5, 1.9, 6, 10), dark);
+      link.position.x = (i - 3) * 12;
+      link.rotation.y = (i % 2) * Math.PI / 2;
+      chain.add(link);
+    }
+    chain.visible = false;
+    stage.scene.add(chain);
+    const after = li * 0.12;
+    let clanked = false;
+    spawn({
+      update(t) {
+        if (t < after) return true;
+        const tt = t - after;
+        if (tt < 0.3) {
+          chain.visible = true;
+          put(chain, c.x, lerp(c.y - 90, c.y, easeIn(tt / 0.3)), 40);
+          dark.opacity = 1;
+        } else {
+          if (!clanked) { clanked = true; puff(c.x, c.y, { color: 0x8a8265, count: 5, size: 18, rise: 6, life: 0.4 }); }
+          put(chain, c.x, c.y, 40);
+          dark.opacity = 1 - easeIn(clamp01((tt - 0.85) / 0.3));
+        }
+        return tt < 1.15;
+      },
+      dispose() { disposeMesh(chain); },
+    });
+  });
+}
+
+function fxSalvo(o) {
+  const L = o.lane, c = center(o.rect);
+  const ship = makeBoat();
+  ship.scale.setScalar(1.2);
+  const dir = c.x > L.left + L.width / 2 ? 1 : -1; // enter from the far edge
+  const x0 = dir > 0 ? L.left - 90 : L.right + 90;
+  const zone = zoneAcross(o);
+  spawn({
+    update(t) {
+      let x;
+      if (t < 0.7) x = lerp(x0, c.x, easeIO(t / 0.7));
+      else if (t < 1.5) x = c.x + (t > 0.75 && t < 0.85 ? -dir * 5 : 0); // recoil
+      else x = lerp(c.x, x0, easeIn((t - 1.5) / 0.7));
+      put(ship, x, c.y + 8 + Math.sin(t * 8) * 2, 21);
+      ship.scale.x = 1.2 * dir;
+      const fade = t > 1.7 ? 1 - clamp01((t - 1.7) / 0.5) : 1;
+      ship.traverse(m => { if (m.material) { m.material.transparent = true; m.material.opacity = fade; } });
+      return t < 2.2;
+    },
+    dispose() { disposeMesh(ship); },
+  });
+  [0.75, 1.05].forEach(when => delay(when, () => {
+    const muzzle = makeSprite(flashTexture(), 0xffe9b0, true);
+    put(muzzle, c.x + dir * 20, c.y - 6, 43);
+    spawn({ update(t) { const k = clamp01(t / 0.18); muzzle.scale.set(lerp(6, 50, easeOut(k)), lerp(6, 50, easeOut(k)), 1); muzzle.material.opacity = 1 - k; return k < 1; },
+      dispose() { stage.scene.remove(muzzle); muzzle.material.dispose(); } });
+    const target = { x: r(zone.left + 30, zone.right - 30), y: zone.top + r(10, zone.height - 10) };
+    shellArc({ x: c.x + dir * 20, y: c.y - 6 }, target, {
+      dur: 0.5,
+      impact: () => puff(target.x, target.y, { color: 0xdfeef5, count: 6, size: 20, rise: 26, life: 0.55 }),
+    });
+  }));
+}
+
+function fxFlak(o) {
+  const zone = zoneAcross(o);
+  for (let i = 0; i < 6; i++) {
+    delay(i * 0.13, () => {
+      const x = r(zone.left + 25, zone.right - 25), y = zone.top + r(5, zone.height - 5);
+      const f = makeSprite(flashTexture(), 0xffd9a0, true);
+      put(f, x, y, 42);
+      spawn({ update(t) { const k = clamp01(t / 0.16); f.scale.set(lerp(4, 34, easeOut(k)), lerp(4, 34, easeOut(k)), 1); f.material.opacity = 1 - k; return k < 1; },
+        dispose() { stage.scene.remove(f); f.material.dispose(); } });
+      puff(x, y, { color: 0x4a4a44, count: 3, size: 16, speed: 18, rise: 6, life: 0.6 });
+    });
+  }
+}
+
+function fxZeppelinDrift(o) {
+  const L = o.lane, y = o.rect.top - 55;
+  const zep = makeZeppelin();
+  const dur = 2.1;
+  spawn({
+    update(t) {
+      const k = clamp01(t / dur);
+      put(zep, lerp(L.left - 110, L.right + 110, k), y + Math.sin(t * 2.4) * 4, 42);
+      const fade = Math.min(1, Math.min(k, 1 - k) * 7);
+      zep.traverse(m => { if (m.material) { m.material.transparent = true; m.material.opacity = fade; } });
+      return k < 1;
+    },
+    dispose() { disposeMesh(zep); },
+  });
+}
+
+function fxTrenchDig(o) {
+  const R = o.rect;
+  for (let i = 0; i < 3; i++) {
+    delay(i * 0.16, () => debris(lerp(R.left + 20, R.right - 20, i / 2), R.top + R.height / 2,
+      { colors: [0x4a3f2c, 0x5c4f36, 0x35301f], count: 6, size: 5, speed: 190, life: 0.8 }));
+  }
+}
+
+function fxSandbags(o) {
+  const R = o.rect;
+  const edge = o.ev.player === o.me ? R.top - 7 : R.top + R.height + 7; // enemy-facing edge
+  for (let i = 0; i < 6; i++) {
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(15, 8, 9),
+      new THREE.MeshLambertMaterial({ color: [0xcabb90, 0xbcac80, 0xd2c49c][i % 3], transparent: true }));
+    bag.visible = false;
+    stage.scene.add(bag);
+    const x = lerp(R.left + 16, R.right - 16, i / 5);
+    const after = i * 0.07;
+    spawn({
+      update(t) {
+        if (t < after) return true;
+        const tt = t - after;
+        bag.visible = true;
+        if (tt < 0.22) put(bag, x, lerp(edge - 60, edge, easeIn(tt / 0.22)), 28);
+        else {
+          put(bag, x, edge, 28);
+          bag.material.opacity = 1 - easeIn(clamp01((tt - 0.75) / 0.3));
+        }
+        return tt < 1.05;
+      },
+      dispose() { disposeMesh(bag); },
+    });
+  }
+}
+
+function fxGusts(o) {
+  const L = o.lane, c = center(o.rect);
+  for (let i = 0; i < 4; i++) {
+    streak(L.left - 40, c.y + r(-30, 30), {
+      dx: L.width + 120, dy: r(-14, 14), len: 130, thick: 7,
+      color: 0xdfeef5, dur: 0.55, after: i * 0.1 });
+  }
+}
+
+function fxStrafe(o) {
+  const zone = zoneAcross(o);
+  for (let i = 0; i < 7; i++) {
+    streak(zone.left + 20 + i * (zone.right - zone.left - 40) / 6, zone.top - 30, {
+      dx: 24, dy: zone.height + 40, len: 46, thick: 5,
+      color: 0xffd98a, dur: 0.22, after: i * 0.05 });
+  }
+}
+
+function fxSweepLane(o) {
+  sweepLight({ left: o.lane.left, right: o.lane.right, top: o.lane.top, height: o.lane.height });
+}
+
+function fxSweepEnemy(o) {
+  const zone = o.ev.player === o.me && o.after.board
+    ? { left: o.after.board.r.left, right: o.after.board.r.right, top: o.after.board.r.top, height: o.after.board.r.height * 0.3 }
+    : zoneAcross(o);
+  sweepLight(zone);
+}
+
+const FLOURISH = {
+  'Support': fxSupport,
+  'Aerodrome': fxBeacon,
+  'Containment': fxLockdown,
+  'Heavy Bombers': fxBombingRun,
+  'Cover Fire': fxCoverFire,
+  'Disrupt': fxLightning,
+  'Heavy Tanks': fxTankRoll,
+  'Juggernaut': fxTankRoll,
+  'Escalation': fxChevrons,
+  'Blockade': fxChainDrop,
+  'Super Battleship': fxSalvo,
+  'Dreadnought': fxSalvo,
+  'Flagship': fxSalvo,
+  'Spotter': fxSweepLane,
+  'Scout Report': fxSweepEnemy,
+  'Codebreakers': fxSweepEnemy,
+  'No-Fly Zone': fxFlak,
+  'Zeppelin Fleet': fxZeppelinDrift,
+  'Trench Line': fxTrenchDig,
+  'Bunker Network': fxSandbags,
+  'Jet Stream': fxGusts,
+  'Strafing Run': fxStrafe,
+};
+
 // ---------- snapshot & dispatch ----------
 
 // Captures screen rects before/after a render so effects know where things
@@ -749,10 +1492,12 @@ export function snapshot() {
   }
   const oppEl = document.querySelector('#handbar .opp-hand');
   const boardEl = document.getElementById('board');
+  const deckEl = document.querySelector('#topbar .deck-ct');
   return {
     strips, hand, lanes,
     opp: oppEl ? { r: oppEl.getBoundingClientRect(), el: oppEl } : null,
     board: boardEl ? { r: boardEl.getBoundingClientRect(), el: boardEl } : null,
+    deck: deckEl ? { r: deckEl.getBoundingClientRect(), el: deckEl } : null,
   };
 }
 
@@ -762,6 +1507,19 @@ export function play(prev, next, ctx, before) {
     const events = diffViews(prev, next);
     if (!events.length) return;
     const after = snapshot();
+
+    // A card's flourish plays after it lands from a deploy or flip-up reveal.
+    const flourishFor = (card, ev, ref, rect, wait) => {
+      const fl = card && FLOURISH[card.name];
+      if (!fl) return;
+      const lane = after.lanes.get(ref.t);
+      if (!lane) return;
+      delay(wait, () => fl({ rect, lane: lane.r, ev, next, after, me: ctx.me }));
+    };
+    // Strafing Run's flip lands in the same update as its deploy.
+    const strafeLanes = new Set(events
+      .filter(e => e.type === 'play' && e.id && byId[e.id].effect === 'strafe')
+      .map(e => e.ref.t));
 
     for (const ev of events) {
       if (ev.type === 'play') {
@@ -775,6 +1533,7 @@ export function play(prev, next, ctx, before) {
               : { x: c.x, y: innerHeight + 80 })
           : { x: c.x + r(-40, 40), y: -70 }; // opponent cards arrive from their side
         deployToss(src, dst.r, card, ev.faceUp, hold(dst.el));
+        if (ev.faceUp) flourishFor(card, ev, ev.ref, dst.r, 0.7);
 
       } else if (ev.type === 'reinforce') {
         const dst = after.strips.get(refKey(ev.ref));
@@ -786,18 +1545,52 @@ export function play(prev, next, ctx, before) {
         if (!dst) continue;
         const card = ev.id ? byId[ev.id] : null;
         if (ev.ref.p !== ev.actor) {
-          explodeFlip(dst.r, card);
+          const boom = () => explodeFlip(dst.r, card);
+          if (ev.via === 'Artillery Strike') {
+            const cd = center(dst.r);
+            shellArc({ x: cd.x + r(-140, 140), y: -60 }, cd, { dur: 0.5, impact: boom });
+          } else if (strafeLanes.has(ev.ref.t)) {
+            delay(0.35, boom); // the strafing tracers hit first
+          } else {
+            boom();
+          }
         } else if (ev.faceUp) {
           popFromHole(dst.r, card, hold(dst.el));
         } else {
           diveIntoHole(dst.r, card, hold(dst.el));
         }
+        if (ev.faceUp) flourishFor(card, ev, ev.ref, dst.r, ev.ref.p === ev.actor ? 1.1 : 0.7);
 
       } else if (ev.type === 'move') {
         const src = before.strips.get(refKey(ev.from));
         const dst = after.strips.get(refKey(ev.to));
         if (!src || !dst) continue;
-        boatMove(src.r, dst.r, ev.id ? byId[ev.id] : null, ev.faceUp, hold(dst.el));
+        const card = ev.id ? byId[ev.id] : null;
+        const reveal = hold(dst.el);
+        if (ev.via === 'Drift Mine') {
+          mineMove(src.r, dst.r, reveal);
+        } else if (ev.via === 'Jet Stream') {
+          gustMove(src.r, dst.r, card, ev.faceUp, ev.flipped, reveal);
+        } else if (ev.via === 'Glider Drop' || (ev.to.t === 'air' && ev.via !== 'Amphibious Assault')) {
+          gliderMove(src.r, dst.r, card, ev.faceUp, ev.flipped, reveal);
+        } else if (ev.to.t === 'land' && ev.via !== 'Amphibious Assault') {
+          truckMove(src.r, dst.r, card, ev.faceUp, ev.flipped, reveal);
+        } else {
+          boatMove(src.r, dst.r, card, ev.faceUp, ev.flipped, reveal);
+        }
+        // A card revealed by Amphibious Assault gets its flourish on arrival.
+        if (ev.flipped && ev.faceUp) flourishFor(card, ev, ev.to, dst.r, 1.6);
+
+      } else if (ev.type === 'draw') {
+        const from = after.deck ? center(after.deck.r) : { x: innerWidth / 2, y: 20 };
+        let to = null, revealEl = null;
+        if (ev.player === ctx.me) {
+          const id = next.hands[ctx.me][next.hands[ctx.me].length - 1];
+          const hc = id && after.hand.get(id);
+          if (hc) { to = center(hc.r); revealEl = hc.el; }
+        }
+        if (!to) to = after.opp ? center(after.opp.r) : { x: innerWidth - 80, y: innerHeight - 60 };
+        drawFly(from, to, hold(revealEl));
 
       } else if (ev.type === 'redeploy') {
         const src = before.strips.get(refKey(ev.from));

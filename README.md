@@ -9,9 +9,12 @@ single static web page. All artwork is original SVG and the ability text is para
 - **Pass & play** — both players share one screen; the view flips between turns.
 - **Animated table** — a three.js + cannon-es layer (loaded from a CDN; the game
   degrades gracefully without it) animates the action: deploys arc out of your hand,
-  Reinforce paradrops in, Transport ferries cards by boat, Redeploy sends a plane to
-  winch the card home, enemy flips explode into shards, and your own flips pop out of
-  a foxhole. Honors `prefers-reduced-motion`.
+  Reinforce paradrops in, moves travel by boat, truck, glider, drifting mine or gust
+  of wind, Redeploy sends a plane to winch the card home, enemy flips explode into
+  physics shards, and your own flips pop out of a foxhole. Every card also has its
+  own deploy flourish — bombing runs, battleship salvos, rolling tanks, flak bursts,
+  lightning, searchlights, parachute flyovers and more. Honors
+  `prefers-reduced-motion`.
 
 ## Publish on GitHub Pages
 

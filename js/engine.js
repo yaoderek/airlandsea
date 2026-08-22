@@ -416,7 +416,8 @@ function resolvePending(st, a) {
       pd.type = 'transport-dest';
       pd.from = a.ref;
       pd.options = st.order.filter(t => t !== a.ref.t);
-      pd.label = 'Transport: choose the destination lane';
+      // Keep the ability's name in the label ("Drift Mine: choose the…").
+      pd.label = `${String(pd.label || 'Transport').split(':')[0]}: choose the destination lane`;
       return pump(st);
     }
     case 'transport-dest': {
