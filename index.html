@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air · Land · Sea — fan clone</title>
+<meta name="description" content="Unofficial fan-made clone of the two-player card game Air, Land & Sea. Play online with a friend or pass-and-play.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Staatliches&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='8' fill='%231b2019'/%3E%3Cpath d='M24 8 L27 18 L42 24 L27 27 L26 35 L32 40 L24 37 L16 40 L22 35 L21 27 L6 24 L21 18 Z' fill='%23e0813f'/%3E%3C/svg%3E">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+<div id="lobby">
+  <div class="lobby-card">
+    <h1><span class="t-air">AIR</span> <span class="dot">·</span> <span class="t-land">LAND</span> <span class="dot">·</span> <span class="t-sea">SEA</span></h1>
+    <p class="tagline">Two commanders. Three lanes. First to 12 victory points.<br>
+    <span class="muted">An unofficial, fan-made clone for playing with a friend.</span></p>
+    <div class="lobby-actions">
+      <button id="btn-host" class="big">Host online game</button>
+      <div class="join-row">
+        <input id="join-code" placeholder="Room code" maxlength="5" autocapitalize="characters" autocomplete="off">
+        <button id="btn-join">Join</button>
+      </div>
+      <button id="btn-hotseat">Pass &amp; play on one screen</button>
+    </div>
+    <div id="lobby-status"></div>
+    <details class="rules">
+      <summary>How to play</summary>
+      <ul>
+        <li>Each battle, you and your opponent are dealt 6 cards across three lanes: Air, Land and Sea.</li>
+        <li>On your turn: <b>deploy</b> a card face-up to its matching lane (its ability triggers), <b>improvise</b> any card face-down to any lane as a plain strength-2, or <b>withdraw</b>.</li>
+        <li>When both hands are empty, whoever holds the higher total strength in a lane controls it — ties (and empty lanes) go to the player with initiative. Control 2 of 3 lanes to win the battle for 6 VP.</li>
+        <li>Withdrawing concedes the battle but gives up fewer VP the earlier you quit (2–6 VP based on cards still in hand).</li>
+        <li>Between battles the lanes rotate, initiative swaps, and everything is reshuffled. First to 12 VP wins the war.</li>
+      </ul>
+    </details>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header id="topbar"></header>
+  <main id="table">
+    <div id="board"></div>
+    <aside id="log"></aside>
+  </main>
+  <footer id="handbar"></footer>
+</div>
+
+<div id="curtain" hidden></div>
+<div id="overlay" hidden></div>
+<div id="toast" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
