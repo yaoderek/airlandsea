@@ -7,6 +7,11 @@ single static web page. All artwork is original SVG and the ability text is para
   other the room link. Connections are peer-to-peer (WebRTC via the free public PeerJS
   broker); there is no game server and nothing to deploy beyond static files.
 - **Pass & play** — both players share one screen; the view flips between turns.
+- **Animated table** — a three.js + cannon-es layer (loaded from a CDN; the game
+  degrades gracefully without it) animates the action: deploys arc out of your hand,
+  Reinforce paradrops in, Transport ferries cards by boat, Redeploy sends a plane to
+  winch the card home, enemy flips explode into shards, and your own flips pop out of
+  a foxhole. Honors `prefers-reduced-motion`.
 
 ## Publish on GitHub Pages
 

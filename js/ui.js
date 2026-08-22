@@ -9,11 +9,19 @@ let lastView = null;
 let ctx = null;        // { me, names, send(action), onRestart|null }
 let wired = false;
 
+// Animation layer (three.js via CDN); the game works fine without it.
+let fx = null;
+if (typeof window !== 'undefined') {
+  import('./fx.js').then(m => { fx = m; }).catch(() => {});
+}
+
 const $ = q => document.querySelector(q);
 const esc = s => String(s).replace(/[&<>"']/g, ch => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
 export function render(view, context) {
+  const prev = lastView;
+  const before = fx && prev ? fx.snapshot() : null;
   lastView = view;
   ctx = context;
   wire();
@@ -24,7 +32,9 @@ export function render(view, context) {
   $('#board').innerHTML = boardHTML(view, mine);
   $('#handbar').innerHTML = handbarHTML(view, mine);
   $('#log').innerHTML = logHTML(view);
+  $('#log').scrollTop = $('#log').scrollHeight;
   renderOverlay(view);
+  if (fx && prev) fx.play(prev, view, ctx, before);
 }
 
 export function toast(msg) {

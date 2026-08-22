@@ -500,6 +500,30 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   box-shadow: 0 6px 20px #000b;
 }
 
+/* ---------- animation layer ---------- */
+
+#fx-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 30; /* over the board, under overlays/toasts */
+  pointer-events: none;
+}
+
+/* freshly-rendered element an animation is about to deliver */
+.fx-hold { visibility: hidden !important; }
+
+.fx-shake { animation: fx-shake .3s linear; }
+@keyframes fx-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translate(3px, -2px); }
+  40% { transform: translate(-3px, 2px); }
+  60% { transform: translate(2px, 1px); }
+  80% { transform: translate(-2px, -1px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-shake { animation: none; }
+}
+
 /* ---------- small screens ---------- */
 
 @media (max-width: 900px) {
